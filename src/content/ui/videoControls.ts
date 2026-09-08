@@ -83,16 +83,48 @@ export function attachVideoControls(
 ): VideoControlsController {
   const mountPoint = targetContainer || video.parentElement || video;
 
+  // Event names to intercept from bubbling or defaulting to the host page
+  const INTERCEPT_EVENTS = [
+    'click',
+    'dblclick',
+    'mousedown',
+    'mouseup',
+    'pointerdown',
+    'pointerup',
+    'touchstart',
+    'touchend'
+  ] as const;
+
   // Build UI element
   const overlay = document.createElement('div');
   overlay.className = 'soc-video-controls';
 
-  // Prevent event propagation to host page
-  ['click', 'dblclick', 'mousedown', 'mouseup', 'pointerdown', 'touchstart'].forEach((evt) => {
-    overlay.addEventListener(evt, (e) => {
+  // Prevent event propagation and unwanted defaults to host page (e.g. anchor navigation)
+  const onOverlayInterceptCapture = (e: Event) => {
+    const target = e.target as HTMLElement | null;
+    const isFormCtrl = target && (target.tagName === 'INPUT' || target.tagName === 'SELECT');
+    if (!isFormCtrl) {
+      e.preventDefault();
+    }
+    if (e.currentTarget === e.target) {
       e.stopPropagation();
       e.stopImmediatePropagation();
-    });
+    }
+  };
+
+  const onOverlayInterceptBubble = (e: Event) => {
+    const target = e.target as HTMLElement | null;
+    const isFormCtrl = target && (target.tagName === 'INPUT' || target.tagName === 'SELECT');
+    if (!isFormCtrl) {
+      e.preventDefault();
+    }
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+  };
+
+  INTERCEPT_EVENTS.forEach((evt) => {
+    overlay.addEventListener(evt, onOverlayInterceptCapture, { capture: true });
+    overlay.addEventListener(evt, onOverlayInterceptBubble, { capture: false });
   });
 
   // Timeline Container
@@ -132,6 +164,10 @@ export function attachVideoControls(
   timeDisplay.className = 'soc-time-display soc-ctrl-time';
   timeDisplay.textContent = `${formatTime(video.currentTime)} / ${formatTime(getVideoDuration(video))}`;
 
+  // Audio preference tracking to guard against Instagram/React forced muting
+  let userMutedPreference: boolean = video.muted;
+  let userVolumePreference: number = (typeof video.volume === 'number' && video.volume > 0) ? video.volume : 1;
+
   // Volume Group (Mute Button & Slider)
   const volumeGroup = document.createElement('div');
   volumeGroup.className = 'soc-volume-group';
@@ -155,11 +191,16 @@ export function attachVideoControls(
   volumeBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     if (video.muted) {
+      userMutedPreference = false;
+      if (userVolumePreference === 0) {
+        userVolumePreference = 1;
+      }
       video.muted = false;
       if (video.volume === 0) {
-        video.volume = 1;
+        video.volume = userVolumePreference;
       }
     } else {
+      userMutedPreference = true;
       video.muted = true;
     }
   });
@@ -168,18 +209,45 @@ export function attachVideoControls(
     e.stopPropagation();
     const val = parseFloat(volumeSlider.value);
     video.volume = val;
-    video.muted = val === 0;
+    if (val === 0) {
+      userMutedPreference = true;
+      video.muted = true;
+    } else {
+      userMutedPreference = false;
+      userVolumePreference = val;
+      video.muted = false;
+    }
   };
   volumeSlider.addEventListener('input', onSliderInput);
   volumeSlider.addEventListener('change', onSliderInput);
 
   const onVolumeChange = () => {
+    if (!video.muted && video.volume > 0) {
+      userMutedPreference = false;
+      userVolumePreference = video.volume;
+    } else if (video.muted && userMutedPreference === false) {
+      // Reject host page / React forced mute and restore user preference
+      video.muted = false;
+      video.volume = userVolumePreference;
+      return;
+    }
+
     const isMuted = video.muted || video.volume === 0;
     volumeBtn.innerHTML = isMuted ? VOLUME_MUTED_SVG : VOLUME_HIGH_SVG;
     volumeBtn.setAttribute('aria-label', isMuted ? 'Unmute' : 'Mute');
     volumeSlider.value = String(video.muted ? 0 : (video.volume !== undefined ? video.volume : 1));
   };
   video.addEventListener('volumechange', onVolumeChange);
+
+  const ensureUserAudioState = () => {
+    if (userMutedPreference === false && video.muted) {
+      video.muted = false;
+      video.volume = userVolumePreference;
+    }
+  };
+  video.addEventListener('seeking', ensureUserAudioState);
+  video.addEventListener('seeked', ensureUserAudioState);
+  video.addEventListener('play', ensureUserAudioState);
 
   volumeGroup.appendChild(volumeBtn);
   volumeGroup.appendChild(volumeSlider);
@@ -242,7 +310,6 @@ export function attachVideoControls(
 
   // State
   let isScrubbing = false;
-  let wasPlayingBeforeScrub = false;
   let hideTimeout: any = null;
 
   function updateTimeline() {
@@ -369,17 +436,11 @@ export function attachVideoControls(
   };
 
   const onPointerDown = (e: PointerEvent) => {
+    e.preventDefault();
     e.stopPropagation();
+    e.stopImmediatePropagation();
     isScrubbing = true;
     timelineContainer.classList.add('soc-scrubbing');
-    wasPlayingBeforeScrub = !video.paused;
-    if (wasPlayingBeforeScrub) {
-      try {
-        video.pause();
-      } catch {
-        // Ignore
-      }
-    }
     if (typeof (timelineContainer as any).setPointerCapture === 'function') {
       try {
         (timelineContainer as any).setPointerCapture(e.pointerId);
@@ -412,20 +473,14 @@ export function attachVideoControls(
     if (isScrubbing) {
       isScrubbing = false;
       timelineContainer.classList.remove('soc-scrubbing');
-      if (wasPlayingBeforeScrub) {
-        wasPlayingBeforeScrub = false;
-        try {
-          video.play().catch(() => {});
-        } catch {
-          // Ignore
-        }
-      }
       scheduleAutoHide();
     }
   };
 
   const onPointerUp = (e: PointerEvent) => {
+    e.preventDefault();
     e.stopPropagation();
+    e.stopImmediatePropagation();
     endScrubbing();
     if (typeof (timelineContainer as any).releasePointerCapture === 'function') {
       try {
@@ -447,23 +502,45 @@ export function attachVideoControls(
     endScrubbing();
   };
 
-  timelineContainer.addEventListener('pointerdown', onPointerDown as any);
-  timelineContainer.addEventListener('pointermove', onPointerMove as any);
-  timelineContainer.addEventListener('pointerup', onPointerUp as any);
+  const onTimelineClick = (e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    seekToPosition(e.clientX);
+  };
+
+  const onTimelineGenericIntercept = (e: Event) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+  };
+
+  INTERCEPT_EVENTS.forEach((evt) => {
+    if (evt === 'pointerdown') {
+      timelineContainer.addEventListener('pointerdown', onPointerDown as any, { capture: true });
+      timelineContainer.addEventListener('pointerdown', onPointerDown as any, { capture: false });
+    } else if (evt === 'pointerup') {
+      timelineContainer.addEventListener('pointerup', onPointerUp as any, { capture: true });
+      timelineContainer.addEventListener('pointerup', onPointerUp as any, { capture: false });
+    } else if (evt === 'click') {
+      timelineContainer.addEventListener('click', onTimelineClick as any, { capture: true });
+      timelineContainer.addEventListener('click', onTimelineClick as any, { capture: false });
+    } else {
+      timelineContainer.addEventListener(evt, onTimelineGenericIntercept as any, { capture: true });
+      timelineContainer.addEventListener(evt, onTimelineGenericIntercept as any, { capture: false });
+    }
+  });
+
   timelineContainer.addEventListener('pointercancel', onPointerUp as any);
+  timelineContainer.addEventListener('pointermove', onPointerMove as any);
 
   window.addEventListener('pointermove', onGlobalPointerMove);
   window.addEventListener('pointerup', onGlobalPointerUp);
 
-  // Mouse fallback for click / mousedown
-  timelineContainer.addEventListener('click', (e) => {
-    e.stopPropagation();
-    seekToPosition(e.clientX);
-  });
-
-  timelineContainer.addEventListener('mouseleave', () => {
+  const onMouseLeaveTooltip = () => {
     tooltip.style.display = 'none';
-  });
+  };
+  timelineContainer.addEventListener('mouseleave', onMouseLeaveTooltip);
 
   // Activity tracking for autohide: Local element listeners
   const onMouseMoveActivity = () => {
@@ -509,6 +586,31 @@ export function attachVideoControls(
     video.removeEventListener('loadeddata', updateTimeline);
     video.removeEventListener('canplay', updateTimeline);
     video.removeEventListener('volumechange', onVolumeChange);
+    video.removeEventListener('seeking', ensureUserAudioState);
+    video.removeEventListener('seeked', ensureUserAudioState);
+    video.removeEventListener('play', ensureUserAudioState);
+
+    INTERCEPT_EVENTS.forEach((evt) => {
+      overlay.removeEventListener(evt, onOverlayInterceptCapture, { capture: true } as any);
+      overlay.removeEventListener(evt, onOverlayInterceptBubble, { capture: false } as any);
+      if (evt === 'pointerdown') {
+        timelineContainer.removeEventListener('pointerdown', onPointerDown as any, { capture: true } as any);
+        timelineContainer.removeEventListener('pointerdown', onPointerDown as any, { capture: false } as any);
+      } else if (evt === 'pointerup') {
+        timelineContainer.removeEventListener('pointerup', onPointerUp as any, { capture: true } as any);
+        timelineContainer.removeEventListener('pointerup', onPointerUp as any, { capture: false } as any);
+      } else if (evt === 'click') {
+        timelineContainer.removeEventListener('click', onTimelineClick as any, { capture: true } as any);
+        timelineContainer.removeEventListener('click', onTimelineClick as any, { capture: false } as any);
+      } else {
+        timelineContainer.removeEventListener(evt, onTimelineGenericIntercept as any, { capture: true } as any);
+        timelineContainer.removeEventListener(evt, onTimelineGenericIntercept as any, { capture: false } as any);
+      }
+    });
+    timelineContainer.removeEventListener('pointercancel', onPointerUp as any);
+    timelineContainer.removeEventListener('pointermove', onPointerMove as any);
+    timelineContainer.removeEventListener('mouseleave', onMouseLeaveTooltip);
+
     mountPoint.removeEventListener('mousemove', onMouseMoveActivity);
     mountPoint.removeEventListener('mouseenter', onMouseMoveActivity);
     overlay.removeEventListener('mousemove', onMouseMoveActivity);

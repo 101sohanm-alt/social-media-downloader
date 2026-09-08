@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { formatTime, attachVideoControls, getVideoDuration } from '../src/content/ui/videoControls';
+import { getInstagramVideoMountPoint } from '../src/content/platforms/instagram';
 import { MediaQuality } from '../src/shared/types';
 
 describe('Video Controls - Utility formatTime and getVideoDuration', () => {
@@ -313,3 +314,225 @@ describe('Video Controls Component (UI & Interactions)', () => {
     expect(clickSpy).not.toHaveBeenCalled();
   });
 });
+
+describe('Instagram Mount Point Escape', () => {
+  it('climbs up out of any <a href="/reel/..."> tag to its parent and ensures relative positioning', () => {
+    const parentContainer = document.createElement('div');
+    const anchor = document.createElement('a');
+    anchor.href = 'https://www.instagram.com/reel/C12345/';
+    const videoWrapper = document.createElement('div');
+    const vid = document.createElement('video');
+
+    videoWrapper.appendChild(vid);
+    anchor.appendChild(videoWrapper);
+    parentContainer.appendChild(anchor);
+    document.body.appendChild(parentContainer);
+
+    const mount = getInstagramVideoMountPoint(vid);
+    expect(mount).toBe(parentContainer);
+    expect(mount.closest('a')).toBeNull();
+    expect(mount.style.position).toBe('relative');
+  });
+
+  it('climbs up out of anchor when candidate mount point is the anchor itself', () => {
+    const parentContainer = document.createElement('div');
+    const anchor = document.createElement('a');
+    anchor.href = '/reel/xyz';
+    const vid = document.createElement('video');
+    anchor.appendChild(vid);
+    parentContainer.appendChild(anchor);
+    document.body.appendChild(parentContainer);
+
+    const mount = getInstagramVideoMountPoint(vid);
+    expect(mount).toBe(parentContainer);
+    expect(mount.closest('a')).toBeNull();
+    expect(mount.style.position).toBe('relative');
+  });
+});
+
+describe('Anchor Tag Navigation Prevention & Event Interception', () => {
+  let video: HTMLVideoElement;
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    container = document.createElement('div');
+    video = document.createElement('video');
+    Object.defineProperty(video, 'duration', { value: 60, writable: true, configurable: true });
+    Object.defineProperty(video, 'currentTime', { value: 0, writable: true, configurable: true });
+    container.appendChild(video);
+  });
+
+  it('calls e.preventDefault(), e.stopPropagation(), and e.stopImmediatePropagation() on pointerdown, pointerup, click, mousedown, mouseup on timelineContainer and overlay, preventing default link activation when inside an anchor', () => {
+    const anchor = document.createElement('a');
+    anchor.href = 'https://www.instagram.com/reel/C12345/';
+    anchor.appendChild(container);
+    document.body.appendChild(anchor);
+
+    const anchorClickSpy = vi.fn();
+    anchor.addEventListener('click', anchorClickSpy);
+
+    attachVideoControls(video, container);
+
+    const overlay = container.querySelector('.soc-video-controls') as HTMLElement;
+    const timelineContainer = container.querySelector('.soc-timeline-container') as HTMLElement;
+
+    const events = ['pointerdown', 'pointerup', 'click', 'mousedown', 'mouseup'];
+
+    for (const eventType of events) {
+      // Test timelineContainer
+      const tlEvent = new Event(eventType, { bubbles: true, cancelable: true });
+      const tlPrevSpy = vi.spyOn(tlEvent, 'preventDefault');
+      const tlStopSpy = vi.spyOn(tlEvent, 'stopPropagation');
+      const tlStopImmSpy = vi.spyOn(tlEvent, 'stopImmediatePropagation');
+
+      timelineContainer.dispatchEvent(tlEvent);
+
+      expect(tlPrevSpy).toHaveBeenCalled();
+      expect(tlStopSpy).toHaveBeenCalled();
+      expect(tlStopImmSpy).toHaveBeenCalled();
+
+      // Test overlay
+      const ovEvent = new Event(eventType, { bubbles: true, cancelable: true });
+      const ovPrevSpy = vi.spyOn(ovEvent, 'preventDefault');
+      const ovStopSpy = vi.spyOn(ovEvent, 'stopPropagation');
+      const ovStopImmSpy = vi.spyOn(ovEvent, 'stopImmediatePropagation');
+
+      overlay.dispatchEvent(ovEvent);
+
+      expect(ovPrevSpy).toHaveBeenCalled();
+      expect(ovStopSpy).toHaveBeenCalled();
+      expect(ovStopImmSpy).toHaveBeenCalled();
+    }
+
+    // Verify anchor click was never triggered
+    expect(anchorClickSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('Mute Preservation Across Seeking & Audio Guard', () => {
+  let video: HTMLVideoElement;
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    container = document.createElement('div');
+    video = document.createElement('video');
+    Object.defineProperty(video, 'duration', { value: 60, writable: true, configurable: true });
+    Object.defineProperty(video, 'currentTime', { value: 0, writable: true, configurable: true });
+    video.play = vi.fn().mockResolvedValue(undefined);
+    video.pause = vi.fn();
+    container.appendChild(video);
+    document.body.appendChild(container);
+  });
+
+  it('does NOT call video.pause() when seeking/scrubbing via the timeline', () => {
+    attachVideoControls(video, container);
+    const timelineContainer = container.querySelector('.soc-timeline-container') as HTMLElement;
+    const timelineTrack = container.querySelector('.soc-timeline-track') as HTMLElement;
+
+    vi.spyOn(timelineTrack, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      width: 100,
+      height: 4,
+      right: 100,
+      bottom: 4,
+      x: 0,
+      y: 0,
+      toJSON: () => {}
+    });
+
+    Object.defineProperty(video, 'paused', { value: false, writable: true, configurable: true });
+
+    const pointerDown = new Event('pointerdown', { bubbles: true, cancelable: true }) as any;
+    pointerDown.clientX = 50;
+    pointerDown.pointerId = 1;
+    timelineContainer.dispatchEvent(pointerDown);
+
+    expect(video.pause).not.toHaveBeenCalled();
+    expect(video.currentTime).toBe(30);
+
+    const pointerUp = new Event('pointerup', { bubbles: true, cancelable: true }) as any;
+    pointerUp.clientX = 50;
+    pointerUp.pointerId = 1;
+    timelineContainer.dispatchEvent(pointerUp);
+
+    expect(video.pause).not.toHaveBeenCalled();
+  });
+
+  it('keeps video.muted === false when seeking via timeline if video is unmuted', () => {
+    video.muted = false;
+    video.volume = 0.8;
+    attachVideoControls(video, container);
+
+    const timelineContainer = container.querySelector('.soc-timeline-container') as HTMLElement;
+    const timelineTrack = container.querySelector('.soc-timeline-track') as HTMLElement;
+
+    vi.spyOn(timelineTrack, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      width: 100,
+      height: 4,
+      right: 100,
+      bottom: 4,
+      x: 0,
+      y: 0,
+      toJSON: () => {}
+    });
+
+    const pointerDown = new Event('pointerdown', { bubbles: true, cancelable: true }) as any;
+    pointerDown.clientX = 50;
+    timelineContainer.dispatchEvent(pointerDown);
+
+    expect(video.muted).toBe(false);
+  });
+
+  it('rejects forced video.muted = true on volumechange or seeked and restores video.muted = false and userVolumePreference when userMutedPreference === false', () => {
+    video.muted = false;
+    video.volume = 0.7;
+    attachVideoControls(video, container);
+
+    // Host page / React player forces muted = true during seeking
+    video.muted = true;
+    video.dispatchEvent(new Event('volumechange'));
+
+    // Controls must reject the forced mute and restore user preference
+    expect(video.muted).toBe(false);
+    expect(video.volume).toBe(0.7);
+
+    // Host page forces muted = true on seeked event
+    video.muted = true;
+    video.dispatchEvent(new Event('seeked'));
+
+    expect(video.muted).toBe(false);
+    expect(video.volume).toBe(0.7);
+
+    // Host page forces muted = true on seeking event
+    video.muted = true;
+    video.dispatchEvent(new Event('seeking'));
+
+    expect(video.muted).toBe(false);
+    expect(video.volume).toBe(0.7);
+  });
+
+  it('respects explicit muting by the user (clicking mute button) and leaves video.muted === true', () => {
+    video.muted = false;
+    video.volume = 0.8;
+    attachVideoControls(video, container);
+
+    const volumeBtn = container.querySelector('.soc-ctrl-volume-btn') as HTMLButtonElement;
+
+    // User explicitly clicks mute button
+    volumeBtn.click();
+    expect(video.muted).toBe(true);
+
+    // External event shouldn't unmute it
+    video.dispatchEvent(new Event('volumechange'));
+    expect(video.muted).toBe(true);
+
+    video.dispatchEvent(new Event('seeked'));
+    expect(video.muted).toBe(true);
+  });
+});
+

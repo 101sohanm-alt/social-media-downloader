@@ -278,27 +278,7 @@ export function setupInstagramInjector(
     insertPoint.after(finalElement);
   }
 
-  function getInstagramVideoMountPoint(video: HTMLVideoElement): HTMLElement {
-    // 1. Try Instagram React instancekey container
-    const instanceContainer = video.closest('div:has(>[data-instancekey]), div[data-instancekey]');
-    if (instanceContainer && instanceContainer.parentElement) {
-      return instanceContainer.parentElement as HTMLElement;
-    }
 
-    // 2. Try climbing up to the element containing the video player frame
-    let curr = video.parentElement;
-    while (curr && curr.parentElement && curr.parentElement !== document.body) {
-      const p = curr.parentElement;
-      const tag = p.tagName.toLowerCase();
-      const role = p.getAttribute('role');
-      if (tag === 'article' || role === 'dialog' || role === 'main' || tag === 'main') {
-        return curr;
-      }
-      curr = p;
-    }
-
-    return video.parentElement || video;
-  }
 
   function processInstagramVideos(root: HTMLElement = document.body) {
     const videos = Array.from(root.querySelectorAll('video')) as HTMLVideoElement[];
@@ -363,6 +343,45 @@ export function setupInstagramInjector(
   });
 
   observer.observe(document.body, { childList: true, subtree: true });
+}
+ 
+export function getInstagramVideoMountPoint(video: HTMLVideoElement): HTMLElement {
+  let mountPoint: HTMLElement;
+
+  // 1. Try Instagram React instancekey container
+  const instanceContainer = video.closest('div:has(>[data-instancekey]), div[data-instancekey]');
+  if (instanceContainer && instanceContainer.parentElement) {
+    mountPoint = instanceContainer.parentElement as HTMLElement;
+  } else {
+    // 2. Try climbing up to the element containing the video player frame
+    let curr = video.parentElement;
+    let found: HTMLElement | null = null;
+    while (curr && curr.parentElement && curr.parentElement !== document.body) {
+      const p = curr.parentElement;
+      const tag = p.tagName.toLowerCase();
+      const role = p.getAttribute('role');
+      if (tag === 'article' || role === 'dialog' || role === 'main' || tag === 'main') {
+        found = curr;
+        break;
+      }
+      curr = p;
+    }
+    mountPoint = found || video.parentElement || video;
+  }
+
+  // If candidate mount point is an <a> tag or contained inside one, climb up to anchor.parentElement
+  const anchor = mountPoint.closest('a');
+  if (anchor && anchor.parentElement) {
+    mountPoint = anchor.parentElement;
+  }
+
+  // Ensure mountPoint has relative positioning for the floating overlay
+  const computedPos = window.getComputedStyle(mountPoint).position;
+  if (!computedPos || computedPos === 'static') {
+    mountPoint.style.position = 'relative';
+  }
+
+  return mountPoint;
 }
 
 export function extractFromDom(
