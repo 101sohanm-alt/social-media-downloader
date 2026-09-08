@@ -4,6 +4,17 @@ import { createDownloadButton } from '../ui/button';
 import { openSelectionModal } from '../ui/selectionModal';
 import { attachVideoControls } from '../ui/videoControls';
 
+function getBestFromSrcset(srcset: string): string | null {
+  if (!srcset) return null;
+  const entries = srcset.split(',').map((part) => {
+    const [u, w] = part.trim().split(/\s+/);
+    const width = parseInt(w?.replace('w', '') || '0', 10);
+    return { url: u, width };
+  });
+  entries.sort((a, b) => b.width - a.width);
+  return entries[0]?.url || null;
+}
+
 export function setupInstagramInjector(
   mediaCache: Map<string, ExtractedMediaItem[]>,
   requestDownload: (items: ExtractedMediaItem[], options?: { forceAll?: boolean }) => Promise<boolean>
@@ -48,17 +59,6 @@ export function setupInstagramInjector(
     }
 
     return null;
-  }
-
-  function getBestFromSrcset(srcset: string): string | null {
-    if (!srcset) return null;
-    const entries = srcset.split(',').map((part) => {
-      const [u, w] = part.trim().split(/\s+/);
-      const width = parseInt(w?.replace('w', '') || '0', 10);
-      return { url: u, width };
-    });
-    entries.sort((a, b) => b.width - a.width);
-    return entries[0]?.url || null;
   }
 
   function findInstagramShareButton(container: HTMLElement): HTMLElement | null {
@@ -156,7 +156,16 @@ export function setupInstagramInjector(
     // Extract shortcode / ID
     const link = container.querySelector('a[href*="/p/"], a[href*="/reel/"]') as HTMLAnchorElement | null;
     const match = link?.href.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
-    const shortcode = match ? match[2] : '';
+    let shortcode = match ? match[2] : '';
+    if (!shortcode) {
+      const timeLink = container.querySelector('time')?.closest('a') as HTMLAnchorElement | null;
+      const timeMatch = timeLink?.href.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+      if (timeMatch) shortcode = timeMatch[2];
+    }
+    if (!shortcode) {
+      const pageMatch = window.location.pathname.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+      if (pageMatch) shortcode = pageMatch[2];
+    }
 
     container.dataset.socInjected = 'true';
 
@@ -194,7 +203,7 @@ export function setupInstagramInjector(
           window.dispatchEvent(
             new CustomEvent('__SOC_REQUEST_FIBER_MEDIA__', { detail: { shortcode } })
           );
-          await new Promise((r) => setTimeout(r, 120));
+          await new Promise((r) => setTimeout(r, 200));
           if (shortcode) {
             items = mediaCache.get(shortcode);
           }
@@ -214,7 +223,7 @@ export function setupInstagramInjector(
 
         // Fallback DOM extraction
         if (!items || items.length === 0) {
-          items = extractFromDom(container, shortcode);
+          items = extractFromDom(container, shortcode, mediaCache);
         }
 
         if (!items || items.length === 0) {
@@ -269,81 +278,63 @@ export function setupInstagramInjector(
     insertPoint.after(finalElement);
   }
 
+  function getInstagramVideoMountPoint(video: HTMLVideoElement): HTMLElement {
+    // 1. Try Instagram React instancekey container
+    const instanceContainer = video.closest('div:has(>[data-instancekey]), div[data-instancekey]');
+    if (instanceContainer && instanceContainer.parentElement) {
+      return instanceContainer.parentElement as HTMLElement;
+    }
+
+    // 2. Try climbing up to the element containing the video player frame
+    let curr = video.parentElement;
+    while (curr && curr.parentElement && curr.parentElement !== document.body) {
+      const p = curr.parentElement;
+      const tag = p.tagName.toLowerCase();
+      const role = p.getAttribute('role');
+      if (tag === 'article' || role === 'dialog' || role === 'main' || tag === 'main') {
+        return curr;
+      }
+      curr = p;
+    }
+
+    return video.parentElement || video;
+  }
+
   function processInstagramVideos(root: HTMLElement = document.body) {
     const videos = Array.from(root.querySelectorAll('video')) as HTMLVideoElement[];
     videos.forEach((video) => {
       if (video.dataset.socControlsInjected) return;
 
-      const parent = video.parentElement;
-      if (!parent) return;
+      const mountPoint = getInstagramVideoMountPoint(video);
+      if (!mountPoint) return;
 
-      // Ensure parent has relative positioning for the floating overlay
-      const computedPos = window.getComputedStyle(parent).position;
+      // Ensure mountPoint has relative positioning for the floating overlay
+      const computedPos = window.getComputedStyle(mountPoint).position;
       if (computedPos === 'static') {
-        parent.style.position = 'relative';
+        mountPoint.style.position = 'relative';
       }
 
       video.dataset.socControlsInjected = 'true';
 
       // Find nearest post/reel shortcode to grab qualities from cache
-      const postEl = video.closest('article, div[role="dialog"], [role="main"]') as HTMLElement | null;
+      const postEl = video.closest('article, div[role="dialog"]') as HTMLElement | null;
       const link = postEl?.querySelector('a[href*="/p/"], a[href*="/reel/"]') as HTMLAnchorElement | null;
       const match = link?.href.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
-      const shortcode = match ? match[2] : '';
+      let shortcode = match ? match[2] : '';
+      if (!shortcode) {
+        const timeLink = postEl?.querySelector('time')?.closest('a') as HTMLAnchorElement | null;
+        const timeMatch = timeLink?.href.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+        if (timeMatch) shortcode = timeMatch[2];
+      }
+      if (!shortcode) {
+        const pageMatch = window.location.pathname.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+        if (pageMatch) shortcode = pageMatch[2];
+      }
 
       let qualities = shortcode ? mediaCache.get(shortcode)?.[0]?.qualities : undefined;
 
-      attachVideoControls(video, parent, { qualities });
+      attachVideoControls(video, mountPoint, { qualities });
     });
-  }
-
-  function extractFromDom(container: HTMLElement, shortcode: string): ExtractedMediaItem[] {
-    const results: ExtractedMediaItem[] = [];
-    const id = shortcode || String(Date.now());
-
-    // Author
-    const authorEl = container.querySelector('header a, a[role="link"][tabindex="0"]') as HTMLAnchorElement | null;
-    const author = authorEl?.textContent?.trim() || 'instagram_user';
-
-    // Check video
-    const video = container.querySelector('video') as HTMLVideoElement | null;
-    if (video && video.src && !video.src.startsWith('blob:')) {
-      results.push({
-        id,
-        platform: 'instagram',
-        type: 'video',
-        author,
-        url: video.src,
-        ext: '.mp4',
-        thumbnailUrl: video.poster || undefined
-      });
-      return results;
-    }
-
-    // Check images
-    const images = Array.from(container.querySelectorAll('img[src*="cdninstagram.com"], img[src*="fbcdn.net"]')) as HTMLImageElement[];
-    // Filter out profile avatar images (usually small or circular)
-    const contentImages = images.filter((img) => {
-      const rect = img.getBoundingClientRect();
-      return rect.width > 150 && rect.height > 150;
-    });
-
-    contentImages.forEach((img, idx) => {
-      const bestUrl = getBestFromSrcset(img.srcset) || img.src;
-      results.push({
-        id,
-        platform: 'instagram',
-        type: 'image',
-        author,
-        url: bestUrl,
-        ext: '.jpg',
-        index: idx + 1,
-        total: contentImages.length,
-        thumbnailUrl: img.src
-      });
-    });
-
-    return results;
   }
 
   // Initial pass
@@ -372,5 +363,73 @@ export function setupInstagramInjector(
   });
 
   observer.observe(document.body, { childList: true, subtree: true });
+}
+
+export function extractFromDom(
+  container: HTMLElement,
+  shortcode: string,
+  mediaCache?: Map<string, ExtractedMediaItem[]>
+): ExtractedMediaItem[] {
+  const results: ExtractedMediaItem[] = [];
+  const id = shortcode || String(Date.now());
+
+  // Author
+  const authorEl = container.querySelector('header a, a[role="link"][tabindex="0"]') as HTMLAnchorElement | null;
+  const author = authorEl?.textContent?.trim() || 'instagram_user';
+
+  // Check video
+  const video = container.querySelector('video') as HTMLVideoElement | null;
+  if (video) {
+    const cached = (shortcode && mediaCache?.get(shortcode)) || (id ? mediaCache?.get(id) : undefined);
+    if (cached && cached.length > 0 && cached[0].type === 'video') {
+      return cached;
+    }
+
+    const directSrc = !video.src.startsWith('blob:') ? video.src : video.querySelector('source')?.src;
+    if (directSrc && !directSrc.startsWith('blob:')) {
+      results.push({
+        id,
+        platform: 'instagram',
+        type: 'video',
+        author,
+        url: directSrc,
+        ext: '.mp4',
+        thumbnailUrl: video.poster || undefined
+      });
+      return results;
+    }
+
+    // Video has blob: src and no direct mp4 found in DOM.
+    // Do NOT fall back to scraping page images or poster jpeg.
+    return [];
+  }
+
+  // Check images strictly if NOT a video post
+  const images = Array.from(container.querySelectorAll('img[src*="cdninstagram.com"], img[src*="fbcdn.net"]')) as HTMLImageElement[];
+  // Filter out profile avatar images (usually small or circular)
+  const contentImages = images.filter((img) => {
+    if (img.closest('header, [role="button"], a[role="link"][tabindex="0"]')) {
+      return false;
+    }
+    const rect = img.getBoundingClientRect();
+    return rect.width > 150 && rect.height > 150;
+  });
+
+  contentImages.forEach((img, idx) => {
+    const bestUrl = getBestFromSrcset(img.srcset) || img.src;
+    results.push({
+      id,
+      platform: 'instagram',
+      type: 'image',
+      author,
+      url: bestUrl,
+      ext: '.jpg',
+      index: idx + 1,
+      total: contentImages.length,
+      thumbnailUrl: img.src
+    });
+  });
+
+  return results;
 }
 

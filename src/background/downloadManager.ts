@@ -60,6 +60,21 @@ async function ensureOffscreenDocument(): Promise<void> {
   creatingOffscreen = null;
 }
 
+async function fetchAsDataUrl(url: string, defaultMime: string): Promise<string> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const buffer = await response.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+  }
+  const base64 = btoa(binary);
+  const mimeType = response.headers.get('content-type') || defaultMime;
+  return `data:${mimeType};base64,${base64}`;
+}
+
 export async function downloadMediaItem(item: ExtractedMediaItem, settings: UserSettings): Promise<boolean> {
   try {
     let downloadUrl = item.url;
@@ -104,21 +119,18 @@ export async function downloadMediaItem(item: ExtractedMediaItem, settings: User
         conflictAction: 'uniquify'
       });
     } catch (directErr) {
-      // Fallback: fetch as Blob in background script (which has full host permissions)
+      // Fallback: fetch directly using extension background permissions and convert to Data URL (SW safe)
       try {
-        const response = await fetch(downloadUrl);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const blob = await response.blob();
-        const blobUrl = URL.createObjectURL(blob);
+        const defaultMime = item.type === 'video' ? 'video/mp4' : 'image/jpeg';
+        const dataUrl = await fetchAsDataUrl(downloadUrl, defaultMime);
         downloadId = await chrome.downloads.download({
-          url: blobUrl,
+          url: dataUrl,
           filename: targetPath,
           saveAs: false,
           conflictAction: 'uniquify'
         });
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
-      } catch (blobErr) {
-        throw directErr || blobErr;
+      } catch (fallbackErr) {
+        throw directErr || fallbackErr;
       }
     }
 

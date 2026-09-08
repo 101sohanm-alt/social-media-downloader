@@ -92,35 +92,11 @@ export function setupRedditInjector(
   }
 
   function processRedditVideoPlayers(root: HTMLElement = document.body) {
-    // 1. Modern Reddit <shreddit-player> (Shadow DOM)
-    const players = Array.from(root.querySelectorAll('shreddit-player')) as HTMLElement[];
-    players.forEach((player) => {
-      if (player.dataset.socControlsInjected) return;
-
-      const shadow = player.shadowRoot;
-      const video = (shadow ? shadow.querySelector('video') : player.querySelector('video')) as HTMLVideoElement | null;
-      if (!video) return;
-
-      player.dataset.socControlsInjected = 'true';
-      const computedPos = window.getComputedStyle(player).position;
-      if (computedPos === 'static') {
-        player.style.position = 'relative';
-      }
-
-      // Look up post ID and cached media
-      const postEl = player.closest('shreddit-post, div.thing') as HTMLElement | null;
-      const rawId = postEl?.getAttribute('id') || postEl?.getAttribute('data-fullname') || '';
-      const postId = cleanPostId(rawId);
-      const qualities = postId ? mediaCache.get(postId)?.[0]?.qualities : undefined;
-
-      attachVideoControls(video, player, { qualities });
-    });
-
-    // 2. Classic Reddit and direct <video> tags
+    // Classic Reddit and standalone <video> tags (shreddit-player already has native player controls)
     const videos = Array.from(root.querySelectorAll('video')) as HTMLVideoElement[];
     videos.forEach((video) => {
       if (video.dataset.socControlsInjected) return;
-      if (video.closest('shreddit-player')) return; // handled above
+      if (video.closest('shreddit-player')) return; // Handled by Reddit's native player controls
 
       const parent = video.parentElement;
       if (!parent) return;

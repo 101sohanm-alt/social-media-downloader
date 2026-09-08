@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { formatTime, attachVideoControls } from '../src/content/ui/videoControls';
+import { formatTime, attachVideoControls, getVideoDuration } from '../src/content/ui/videoControls';
 import { MediaQuality } from '../src/shared/types';
 
-describe('Video Controls - Utility formatTime', () => {
+describe('Video Controls - Utility formatTime and getVideoDuration', () => {
   it('formats seconds into M:SS correctly', () => {
     expect(formatTime(0)).toBe('0:00');
     expect(formatTime(5)).toBe('0:05');
@@ -19,6 +19,20 @@ describe('Video Controls - Utility formatTime', () => {
   it('handles negative or NaN gracefully', () => {
     expect(formatTime(-5)).toBe('0:00');
     expect(formatTime(NaN)).toBe('0:00');
+  });
+
+  it('extracts duration correctly from seekable when duration is Infinity', () => {
+    const vid = document.createElement('video');
+    Object.defineProperty(vid, 'duration', { value: Infinity, configurable: true });
+    Object.defineProperty(vid, 'seekable', {
+      value: {
+        length: 1,
+        end: (idx: number) => 42.5
+      },
+      configurable: true
+    });
+
+    expect(getVideoDuration(vid)).toBe(42.5);
   });
 });
 
@@ -87,17 +101,17 @@ describe('Video Controls Component (UI & Interactions)', () => {
     expect(video.pause).toHaveBeenCalled();
   });
 
-  it('omits 10s jump buttons, picture-in-picture button, and volume control for a clean subtle single line', () => {
+  it('omits 10s jump buttons and picture-in-picture button for a clean subtle single line, while providing volume controls', () => {
     attachVideoControls(video, container);
     expect(container.querySelector('.soc-ctrl-jump-back')).toBeNull();
     expect(container.querySelector('.soc-ctrl-jump-fwd')).toBeNull();
     expect(container.querySelector('.soc-pip-btn')).toBeNull();
-    expect(container.querySelector('.soc-volume-group')).toBeNull();
-    expect(container.querySelector('.soc-ctrl-volume-btn')).toBeNull();
-    expect(container.querySelector('.soc-ctrl-volume-slider')).toBeNull();
+    expect(container.querySelector('.soc-volume-group')).not.toBeNull();
+    expect(container.querySelector('.soc-ctrl-volume-btn')).not.toBeNull();
+    expect(container.querySelector('.soc-ctrl-volume-slider')).not.toBeNull();
   });
 
-  it('renders all controls in a single horizontal row without volume controls', () => {
+  it('renders all controls in a single horizontal row including volume controls', () => {
     attachVideoControls(video, container);
     const controls = container.querySelector('.soc-video-controls') as HTMLElement;
     expect(controls).not.toBeNull();
@@ -106,20 +120,71 @@ describe('Video Controls Component (UI & Interactions)', () => {
     const playBtn = controls.querySelector('.soc-ctrl-play');
     const timeDisplay = controls.querySelector('.soc-ctrl-time');
     const timeline = controls.querySelector('.soc-timeline-container');
+    const volumeGroup = controls.querySelector('.soc-volume-group');
     const speedBtn = controls.querySelector('.soc-ctrl-speed');
     const fullscreenBtn = controls.querySelector('.soc-fullscreen-btn');
 
     expect(playBtn).not.toBeNull();
     expect(timeDisplay).not.toBeNull();
     expect(timeline).not.toBeNull();
+    expect(volumeGroup).not.toBeNull();
     expect(speedBtn).not.toBeNull();
     expect(fullscreenBtn).not.toBeNull();
 
-    // Ensure volume is completely absent
-    expect(controls.querySelector('.soc-volume-group')).toBeNull();
-
     // Ensure no multi-row wrappers exist
     expect(controls.querySelector('.soc-controls-row')).toBeNull();
+  });
+
+  it('controls volume: toggles mute, updates slider, and syncs on volumechange', () => {
+    video.volume = 1;
+    video.muted = false;
+
+    attachVideoControls(video, container);
+    const volumeGroup = container.querySelector('.soc-volume-group') as HTMLElement;
+    const volumeBtn = container.querySelector('.soc-ctrl-volume-btn') as HTMLButtonElement;
+    const volumeSlider = container.querySelector('.soc-ctrl-volume-slider') as HTMLInputElement;
+
+    expect(volumeGroup).not.toBeNull();
+    expect(volumeBtn).not.toBeNull();
+    expect(volumeSlider).not.toBeNull();
+    expect(parseFloat(volumeSlider.value)).toBe(1);
+
+    // 1. Toggle mute on button click
+    volumeBtn.click();
+    expect(video.muted).toBe(true);
+
+    // 2. Unmute on button click
+    volumeBtn.click();
+    expect(video.muted).toBe(false);
+
+    // If volume was 0 when unmuting, volume should restore to 1
+    video.volume = 0;
+    video.muted = true;
+    volumeBtn.click();
+    expect(video.muted).toBe(false);
+    expect(video.volume).toBe(1);
+
+    // 3. Adjust volume slider
+    volumeSlider.value = '0.5';
+    volumeSlider.dispatchEvent(new Event('input'));
+    expect(video.volume).toBeCloseTo(0.5);
+    expect(video.muted).toBe(false);
+
+    // Slider to 0 should mute
+    volumeSlider.value = '0';
+    volumeSlider.dispatchEvent(new Event('input'));
+    expect(video.volume).toBe(0);
+    expect(video.muted).toBe(true);
+
+    // 4. Two-way sync when video fires volumechange
+    video.volume = 0.75;
+    video.muted = false;
+    video.dispatchEvent(new Event('volumechange'));
+    expect(parseFloat(volumeSlider.value)).toBeCloseTo(0.75);
+
+    video.muted = true;
+    video.dispatchEvent(new Event('volumechange'));
+    expect(volumeBtn.innerHTML).toContain('line'); // VOLUME_MUTED_SVG contains <line>
   });
 
   it('seeks video when clicking or scrubbing along the timeline track', () => {
@@ -160,6 +225,18 @@ describe('Video Controls Component (UI & Interactions)', () => {
     timelineContainer.dispatchEvent(pointerMove);
 
     expect(video.currentTime).toBe(45);
+
+    // Global window pointermove outside the container (e.g. clientX = 150 -> 25% -> 15s)
+    const globalMove = new Event('pointermove', { bubbles: true, cancelable: true }) as any;
+    globalMove.clientX = 150;
+    window.dispatchEvent(globalMove);
+
+    expect(video.currentTime).toBe(15);
+
+    // Global window pointerup ends scrubbing
+    const globalUp = new Event('pointerup', { bubbles: true, cancelable: true }) as any;
+    window.dispatchEvent(globalUp);
+    expect(timelineContainer.classList.contains('soc-scrubbing')).toBe(false);
   });
 
   it('switches quality source when quality selector changes', () => {
@@ -197,8 +274,24 @@ describe('Video Controls Component (UI & Interactions)', () => {
     vi.advanceTimersByTime(2600);
     expect(overlay.classList.contains('soc-hidden')).toBe(true);
 
-    // Mouse move brings it back
-    container.dispatchEvent(new MouseEvent('mousemove'));
+    // Document-level mouse move over video area brings it back
+    vi.spyOn(video, 'getBoundingClientRect').mockReturnValue({
+      left: 100,
+      top: 100,
+      right: 500,
+      bottom: 400,
+      width: 400,
+      height: 300,
+      x: 100,
+      y: 100,
+      toJSON: () => {}
+    });
+
+    const docMove = new MouseEvent('mousemove', { bubbles: true, cancelable: true });
+    Object.defineProperty(docMove, 'clientX', { value: 200 });
+    Object.defineProperty(docMove, 'clientY', { value: 200 });
+    document.dispatchEvent(docMove);
+
     expect(overlay.classList.contains('soc-hidden')).toBe(false);
   });
 

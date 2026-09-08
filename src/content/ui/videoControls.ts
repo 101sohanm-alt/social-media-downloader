@@ -61,6 +61,21 @@ const FULLSCREEN_SVG = `
   </svg>
 `;
 
+export function getVideoDuration(video: HTMLVideoElement): number {
+  if (isFinite(video.duration) && video.duration > 0) {
+    return video.duration;
+  }
+  if (video.seekable && video.seekable.length > 0) {
+    try {
+      const end = video.seekable.end(video.seekable.length - 1);
+      if (isFinite(end) && end > 0) return end;
+    } catch {
+      // Ignore
+    }
+  }
+  return 0;
+}
+
 export function attachVideoControls(
   video: HTMLVideoElement,
   targetContainer?: HTMLElement,
@@ -115,7 +130,59 @@ export function attachVideoControls(
   // Time Display
   const timeDisplay = document.createElement('span');
   timeDisplay.className = 'soc-time-display soc-ctrl-time';
-  timeDisplay.textContent = `${formatTime(video.currentTime)} / ${formatTime(video.duration || 0)}`;
+  timeDisplay.textContent = `${formatTime(video.currentTime)} / ${formatTime(getVideoDuration(video))}`;
+
+  // Volume Group (Mute Button & Slider)
+  const volumeGroup = document.createElement('div');
+  volumeGroup.className = 'soc-volume-group';
+
+  const volumeBtn = document.createElement('button');
+  volumeBtn.className = 'soc-ctrl-btn soc-ctrl-volume soc-ctrl-volume-btn';
+  volumeBtn.type = 'button';
+  const initialMuted = video.muted || video.volume === 0;
+  volumeBtn.setAttribute('aria-label', initialMuted ? 'Unmute' : 'Mute');
+  volumeBtn.innerHTML = initialMuted ? VOLUME_MUTED_SVG : VOLUME_HIGH_SVG;
+
+  const volumeSlider = document.createElement('input');
+  volumeSlider.className = 'soc-ctrl-volume-slider';
+  volumeSlider.type = 'range';
+  volumeSlider.min = '0';
+  volumeSlider.max = '1';
+  volumeSlider.step = '0.05';
+  volumeSlider.value = String(video.muted ? 0 : (video.volume !== undefined ? video.volume : 1));
+  volumeSlider.setAttribute('aria-label', 'Volume');
+
+  volumeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (video.muted) {
+      video.muted = false;
+      if (video.volume === 0) {
+        video.volume = 1;
+      }
+    } else {
+      video.muted = true;
+    }
+  });
+
+  const onSliderInput = (e: Event) => {
+    e.stopPropagation();
+    const val = parseFloat(volumeSlider.value);
+    video.volume = val;
+    video.muted = val === 0;
+  };
+  volumeSlider.addEventListener('input', onSliderInput);
+  volumeSlider.addEventListener('change', onSliderInput);
+
+  const onVolumeChange = () => {
+    const isMuted = video.muted || video.volume === 0;
+    volumeBtn.innerHTML = isMuted ? VOLUME_MUTED_SVG : VOLUME_HIGH_SVG;
+    volumeBtn.setAttribute('aria-label', isMuted ? 'Unmute' : 'Mute');
+    volumeSlider.value = String(video.muted ? 0 : (video.volume !== undefined ? video.volume : 1));
+  };
+  video.addEventListener('volumechange', onVolumeChange);
+
+  volumeGroup.appendChild(volumeBtn);
+  volumeGroup.appendChild(volumeSlider);
 
   // Speed Button (Cycling 1 -> 1.25 -> 1.5 -> 2 -> 0.5 -> 0.75 -> 1)
   const speedCycle = [1, 1.25, 1.5, 2, 0.5, 0.75];
@@ -162,10 +229,11 @@ export function attachVideoControls(
   fullscreenBtn.setAttribute('aria-label', 'Fullscreen');
   fullscreenBtn.innerHTML = FULLSCREEN_SVG;
 
-  // Append strictly into 1 single horizontal line (No volume controls)
+  // Append strictly into 1 single horizontal line
   overlay.appendChild(playPauseBtn);
   overlay.appendChild(timeDisplay);
   overlay.appendChild(timelineContainer);
+  overlay.appendChild(volumeGroup);
   overlay.appendChild(speedBtn);
   overlay.appendChild(qualitySelect);
   overlay.appendChild(fullscreenBtn);
@@ -174,10 +242,11 @@ export function attachVideoControls(
 
   // State
   let isScrubbing = false;
+  let wasPlayingBeforeScrub = false;
   let hideTimeout: any = null;
 
   function updateTimeline() {
-    const dur = video.duration || 0;
+    const dur = getVideoDuration(video);
     const cur = video.currentTime || 0;
     const pct = dur > 0 ? (cur / dur) * 100 : 0;
     progressBar.style.width = `${pct}%`;
@@ -201,6 +270,11 @@ export function attachVideoControls(
     if (hideTimeout) clearTimeout(hideTimeout);
     if (!video.paused && !isScrubbing) {
       hideTimeout = setTimeout(() => {
+        // Never autohide if user is hovering over the controls
+        if (overlay.matches(':hover')) {
+          scheduleAutoHide();
+          return;
+        }
         overlay.classList.add('soc-controls-hidden');
         overlay.classList.add('soc-hidden');
       }, 2500);
@@ -208,6 +282,7 @@ export function attachVideoControls(
   }
 
   function showControls() {
+    if (hideTimeout) clearTimeout(hideTimeout);
     overlay.classList.remove('soc-controls-hidden');
     overlay.classList.remove('soc-hidden');
     scheduleAutoHide();
@@ -234,6 +309,9 @@ export function attachVideoControls(
   video.addEventListener('pause', onPause);
   video.addEventListener('timeupdate', onTimeUpdate);
   video.addEventListener('loadedmetadata', updateTimeline);
+  video.addEventListener('durationchange', updateTimeline);
+  video.addEventListener('loadeddata', updateTimeline);
+  video.addEventListener('canplay', updateTimeline);
 
   // Button interactions
   playPauseBtn.addEventListener('click', (e) => {
@@ -277,12 +355,12 @@ export function attachVideoControls(
     if (rect.width <= 0) return;
 
     const pos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const dur = video.duration;
-    if (isFinite(dur) && dur > 0) {
+    const dur = getVideoDuration(video);
+    if (dur > 0) {
       const targetTime = Math.max(0, Math.min(dur, pos * dur));
       try {
         video.currentTime = targetTime;
-      } catch (err) {
+      } catch {
         // Fallback or ignore
       }
     }
@@ -293,6 +371,15 @@ export function attachVideoControls(
   const onPointerDown = (e: PointerEvent) => {
     e.stopPropagation();
     isScrubbing = true;
+    timelineContainer.classList.add('soc-scrubbing');
+    wasPlayingBeforeScrub = !video.paused;
+    if (wasPlayingBeforeScrub) {
+      try {
+        video.pause();
+      } catch {
+        // Ignore
+      }
+    }
     if (typeof (timelineContainer as any).setPointerCapture === 'function') {
       try {
         (timelineContainer as any).setPointerCapture(e.pointerId);
@@ -313,7 +400,7 @@ export function attachVideoControls(
     const rect = trackRect.width > 0 ? trackRect : timelineContainer.getBoundingClientRect();
     if (rect.width > 0) {
       const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      const dur = video.duration || 0;
+      const dur = getVideoDuration(video);
       const hoverTime = pos * dur;
       tooltip.textContent = formatTime(hoverTime);
       tooltip.style.left = `${pos * 100}%`;
@@ -321,13 +408,14 @@ export function attachVideoControls(
     }
   };
 
-  const onPointerUp = (e: PointerEvent) => {
+  const endScrubbing = () => {
     if (isScrubbing) {
-      e.stopPropagation();
       isScrubbing = false;
-      if (typeof (timelineContainer as any).releasePointerCapture === 'function') {
+      timelineContainer.classList.remove('soc-scrubbing');
+      if (wasPlayingBeforeScrub) {
+        wasPlayingBeforeScrub = false;
         try {
-          (timelineContainer as any).releasePointerCapture(e.pointerId);
+          video.play().catch(() => {});
         } catch {
           // Ignore
         }
@@ -336,10 +424,36 @@ export function attachVideoControls(
     }
   };
 
+  const onPointerUp = (e: PointerEvent) => {
+    e.stopPropagation();
+    endScrubbing();
+    if (typeof (timelineContainer as any).releasePointerCapture === 'function') {
+      try {
+        (timelineContainer as any).releasePointerCapture(e.pointerId);
+      } catch {
+        // Ignore
+      }
+    }
+  };
+
+  // Global window listeners to ensure drag scrubbing continues outside timeline bounds
+  const onGlobalPointerMove = (e: PointerEvent) => {
+    if (isScrubbing) {
+      seekToPosition(e.clientX);
+    }
+  };
+
+  const onGlobalPointerUp = () => {
+    endScrubbing();
+  };
+
   timelineContainer.addEventListener('pointerdown', onPointerDown as any);
   timelineContainer.addEventListener('pointermove', onPointerMove as any);
   timelineContainer.addEventListener('pointerup', onPointerUp as any);
   timelineContainer.addEventListener('pointercancel', onPointerUp as any);
+
+  window.addEventListener('pointermove', onGlobalPointerMove);
+  window.addEventListener('pointerup', onGlobalPointerUp);
 
   // Mouse fallback for click / mousedown
   timelineContainer.addEventListener('click', (e) => {
@@ -351,13 +465,37 @@ export function attachVideoControls(
     tooltip.style.display = 'none';
   });
 
-  // Activity tracking for autohide
+  // Activity tracking for autohide: Local element listeners
   const onMouseMoveActivity = () => {
     showControls();
   };
 
   mountPoint.addEventListener('mousemove', onMouseMoveActivity);
   mountPoint.addEventListener('mouseenter', onMouseMoveActivity);
+  overlay.addEventListener('mousemove', onMouseMoveActivity);
+  overlay.addEventListener('mouseenter', onMouseMoveActivity);
+
+  // Global Document Mouse Tracking: Ensures controls reappear even when Instagram transparent tap overlays intercept events
+  let lastDocMouseMove = 0;
+  const onDocumentMouseMove = (e: MouseEvent) => {
+    const now = Date.now();
+    if (now - lastDocMouseMove < 50) return;
+    lastDocMouseMove = now;
+
+    const rect = video.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    if (
+      e.clientX >= rect.left - 20 &&
+      e.clientX <= rect.right + 20 &&
+      e.clientY >= rect.top - 20 &&
+      e.clientY <= rect.bottom + 20
+    ) {
+      showControls();
+    }
+  };
+
+  document.addEventListener('mousemove', onDocumentMouseMove, { passive: true });
 
   updateTimeline();
 
@@ -367,8 +505,17 @@ export function attachVideoControls(
     video.removeEventListener('pause', onPause);
     video.removeEventListener('timeupdate', onTimeUpdate);
     video.removeEventListener('loadedmetadata', updateTimeline);
+    video.removeEventListener('durationchange', updateTimeline);
+    video.removeEventListener('loadeddata', updateTimeline);
+    video.removeEventListener('canplay', updateTimeline);
+    video.removeEventListener('volumechange', onVolumeChange);
     mountPoint.removeEventListener('mousemove', onMouseMoveActivity);
     mountPoint.removeEventListener('mouseenter', onMouseMoveActivity);
+    overlay.removeEventListener('mousemove', onMouseMoveActivity);
+    overlay.removeEventListener('mouseenter', onMouseMoveActivity);
+    document.removeEventListener('mousemove', onDocumentMouseMove);
+    window.removeEventListener('pointermove', onGlobalPointerMove);
+    window.removeEventListener('pointerup', onGlobalPointerUp);
     overlay.remove();
   };
 
