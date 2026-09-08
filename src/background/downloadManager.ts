@@ -95,14 +95,35 @@ export async function downloadMediaItem(item: ExtractedMediaItem, settings: User
 
     const targetPath = settings.subfolder ? `${settings.subfolder}/${filename}` : filename;
 
-    const downloadId = await chrome.downloads.download({
-      url: downloadUrl,
-      filename: targetPath,
-      saveAs: false
-    });
+    let downloadId: number | undefined;
+    try {
+      downloadId = await chrome.downloads.download({
+        url: downloadUrl,
+        filename: targetPath,
+        saveAs: false,
+        conflictAction: 'uniquify'
+      });
+    } catch (directErr) {
+      // Fallback: fetch as Blob in background script (which has full host permissions)
+      try {
+        const response = await fetch(downloadUrl);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        downloadId = await chrome.downloads.download({
+          url: blobUrl,
+          filename: targetPath,
+          saveAs: false,
+          conflictAction: 'uniquify'
+        });
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+      } catch (blobErr) {
+        throw directErr || blobErr;
+      }
+    }
 
     await recordHistory({
-      id: String(downloadId),
+      id: String(downloadId || Date.now()),
       platform: item.platform,
       author: item.author || 'unknown',
       filename,

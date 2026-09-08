@@ -29,8 +29,8 @@ export function setupInstagramInjector(
     }
 
     try {
-      const res = await fetch(`/graphql/query/?query_hash=b3055c2e470ed3da04ba226ee55049e4&variables=${encodeURIComponent(
-        JSON.stringify({ shortcode, child_comment_count: 0, fetch_comment_count: 0, parent_comment_count: 0, has_threaded_comments: false })
+      const res = await fetch(`/graphql/query/?doc_id=8845758582119845&variables=${encodeURIComponent(
+        JSON.stringify({ shortcode })
       )}`, {
         headers: {
           'X-IG-App-ID': '936619743392459',
@@ -50,29 +50,6 @@ export function setupInstagramInjector(
     return null;
   }
 
-  function extractFromReactFiber(container: HTMLElement): ExtractedMediaItem[] | null {
-    try {
-      for (const key of Object.keys(container)) {
-        if (key.startsWith('__reactFiber$') || key.startsWith('__reactInternalInstance$')) {
-          let fiber = (container as any)[key];
-          let depth = 0;
-          while (fiber && depth < 40) {
-            const props = fiber.memoizedProps;
-            const post = props?.post || props?.media || props?.item;
-            if (post) {
-              const parsed = parseInstagramMedia(post);
-              if (parsed && parsed.length > 0) return parsed;
-            }
-            fiber = fiber.return;
-            depth++;
-          }
-        }
-      }
-    } catch {
-      // Ignore
-    }
-    return null;
-  }
   function getBestFromSrcset(srcset: string): string | null {
     if (!srcset) return null;
     const entries = srcset.split(',').map((part) => {
@@ -139,7 +116,6 @@ export function setupInstagramInjector(
       ) {
         const parent = curr.parentElement;
         if (parent.children.length > 1) {
-          // The last child in the left group is the Share button!
           return parent.lastElementChild as HTMLElement;
         }
         curr = parent;
@@ -192,24 +168,42 @@ export function setupInstagramInjector(
 
         let items = shortcode ? mediaCache.get(shortcode) : undefined;
 
-        const hasCarouselClues = Boolean(
+        // Check if container has carousel clues (pagination indicators, dots, next buttons, 1/N text)
+        let expectedTotal = 1;
+        const pageCountMatch = Array.from(container.querySelectorAll('span, div'))
+          .map((el) => el.textContent?.trim() || '')
+          .find((text) => /^\d+\/(\d+)$/.test(text));
+        if (pageCountMatch) {
+          const m = pageCountMatch.match(/^\d+\/(\d+)$/);
+          if (m) expectedTotal = parseInt(m[1], 10);
+        }
+
+        const hasCarouselClues = expectedTotal > 1 || Boolean(
           container.querySelector(
             'button[aria-label*="Next" i], button[aria-label*="Previous" i], button[aria-label*="Suivant" i], button[aria-label*="Weiter" i], [aria-label*="Carousel" i], .coreSpritePagingChevron, div[role="tablist"]'
-          ) ||
-          Array.from(container.querySelectorAll('span, div')).some((el) => /^\d+\/\d+$/.test(el.textContent?.trim() || ''))
+          )
         );
 
-        // If not cached or incomplete carousel, extract via Fiber or fetch post JSON
-        if (!items || items.length === 0 || (items.length === 1 && hasCarouselClues)) {
-          // 1. Try React Fiber extraction first
-          const fiberItems = extractFromReactFiber(container);
-          if (fiberItems && (fiberItems.length > 1 || !hasCarouselClues)) {
-            items = fiberItems;
-            if (shortcode) mediaCache.set(shortcode, items);
+        const isIncomplete =
+          !items ||
+          items.length === 0 ||
+          (hasCarouselClues && (items.length < expectedTotal || items.length <= 3));
+
+        if (isIncomplete) {
+          // 1. Request MAIN world React Fiber inspection
+          window.dispatchEvent(
+            new CustomEvent('__SOC_REQUEST_FIBER_MEDIA__', { detail: { shortcode } })
+          );
+          await new Promise((r) => setTimeout(r, 120));
+          if (shortcode) {
+            items = mediaCache.get(shortcode);
           }
         }
 
-        if ((!items || items.length === 0 || (items.length === 1 && hasCarouselClues)) && shortcode) {
+        if (
+          (!items || items.length === 0 || (hasCarouselClues && (items.length < expectedTotal || items.length <= 3))) &&
+          shortcode
+        ) {
           updateState('loading', 'Loading all slides...');
           const fetchedItems = await fetchInstagramPostJson(shortcode);
           if (fetchedItems && fetchedItems.length > 0) {

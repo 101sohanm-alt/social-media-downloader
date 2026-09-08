@@ -173,5 +173,41 @@ describe('Instagram Media Parser', () => {
     expect(result[0].id).toBe('XdtCode');
     expect(result[0].author).toBe('xdtuser');
   });
+
+  it('handles modern xdt_api__v1__media__shortcode__web_info carousel with >3 items (e.g. 5 slides)', () => {
+    const mockWebInfo = {
+      data: {
+        xdt_api__v1__media__shortcode__web_info: {
+          items: [
+            {
+              id: '33445566_0',
+              code: 'ModernCarousel5',
+              user: { username: 'artist' },
+              carousel_media_count: 5,
+              carousel_media: Array.from({ length: 5 }, (_, i) => ({
+                id: `slide_${i + 1}`,
+                image_versions2: {
+                  candidates: [
+                    { width: 1080, height: 1080, url: `https://instagram.fna.fbcdn.net/slide_${i + 1}_1080.jpg` },
+                    { width: 640, height: 640, url: `https://instagram.fna.fbcdn.net/slide_${i + 1}_640.jpg` }
+                  ]
+                }
+              }))
+            }
+          ]
+        }
+      }
+    };
+
+    const result = parseInstagramMedia(mockWebInfo);
+    expect(result).toHaveLength(5);
+    expect(result[0].id).toBe('ModernCarousel5');
+    expect(result[0].author).toBe('artist');
+    expect(result[0].index).toBe(1);
+    expect(result[0].total).toBe(5);
+    expect(result[0].url).toBe('https://instagram.fna.fbcdn.net/slide_1_1080.jpg');
+    expect(result[4].index).toBe(5);
+    expect(result[4].url).toBe('https://instagram.fna.fbcdn.net/slide_5_1080.jpg');
+  });
 });
 

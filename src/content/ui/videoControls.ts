@@ -82,10 +82,10 @@ export function attachVideoControls(
 
   // Timeline Container
   const timelineContainer = document.createElement('div');
-  timelineContainer.className = 'soc-timeline-container soc-timeline-bar';
+  timelineContainer.className = 'soc-timeline-container';
 
   const timelineTrack = document.createElement('div');
-  timelineTrack.className = 'soc-timeline-track';
+  timelineTrack.className = 'soc-timeline-track soc-timeline-bar';
 
   const bufferedBar = document.createElement('div');
   bufferedBar.className = 'soc-timeline-buffered';
@@ -116,27 +116,6 @@ export function attachVideoControls(
   const timeDisplay = document.createElement('span');
   timeDisplay.className = 'soc-time-display soc-ctrl-time';
   timeDisplay.textContent = `${formatTime(video.currentTime)} / ${formatTime(video.duration || 0)}`;
-
-  // Volume Group (placed inline on the right side)
-  const volumeGroup = document.createElement('div');
-  volumeGroup.className = 'soc-volume-group';
-
-  const volumeBtn = document.createElement('button');
-  volumeBtn.className = 'soc-ctrl-btn soc-ctrl-volume-btn soc-volume-btn';
-  volumeBtn.type = 'button';
-  volumeBtn.setAttribute('aria-label', 'Volume');
-  volumeBtn.innerHTML = video.muted || video.volume === 0 ? VOLUME_MUTED_SVG : VOLUME_HIGH_SVG;
-
-  const volumeSlider = document.createElement('input');
-  volumeSlider.className = 'soc-volume-slider soc-ctrl-volume-slider';
-  volumeSlider.type = 'range';
-  volumeSlider.min = '0';
-  volumeSlider.max = '1';
-  volumeSlider.step = '0.05';
-  volumeSlider.value = String(video.muted ? 0 : video.volume || 1);
-
-  volumeGroup.appendChild(volumeBtn);
-  volumeGroup.appendChild(volumeSlider);
 
   // Speed Button (Cycling 1 -> 1.25 -> 1.5 -> 2 -> 0.5 -> 0.75 -> 1)
   const speedCycle = [1, 1.25, 1.5, 2, 0.5, 0.75];
@@ -183,11 +162,10 @@ export function attachVideoControls(
   fullscreenBtn.setAttribute('aria-label', 'Fullscreen');
   fullscreenBtn.innerHTML = FULLSCREEN_SVG;
 
-  // Append strictly into 1 single horizontal line
+  // Append strictly into 1 single horizontal line (No volume controls)
   overlay.appendChild(playPauseBtn);
   overlay.appendChild(timeDisplay);
   overlay.appendChild(timelineContainer);
-  overlay.appendChild(volumeGroup);
   overlay.appendChild(speedBtn);
   overlay.appendChild(qualitySelect);
   overlay.appendChild(fullscreenBtn);
@@ -252,15 +230,9 @@ export function attachVideoControls(
     if (!isScrubbing) updateTimeline();
   };
 
-  const onVolumeChange = () => {
-    volumeSlider.value = String(video.muted ? 0 : video.volume);
-    volumeBtn.innerHTML = video.muted || video.volume === 0 ? VOLUME_MUTED_SVG : VOLUME_HIGH_SVG;
-  };
-
   video.addEventListener('play', onPlay);
   video.addEventListener('pause', onPause);
   video.addEventListener('timeupdate', onTimeUpdate);
-  video.addEventListener('volumechange', onVolumeChange);
   video.addEventListener('loadedmetadata', updateTimeline);
 
   // Button interactions
@@ -271,18 +243,6 @@ export function attachVideoControls(
     } else {
       video.pause();
     }
-  });
-
-  volumeBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    video.muted = !video.muted;
-  });
-
-  volumeSlider.addEventListener('input', (e) => {
-    e.stopPropagation();
-    const val = parseFloat(volumeSlider.value);
-    video.volume = val;
-    video.muted = val === 0;
   });
 
   qualitySelect.addEventListener('change', (e) => {
@@ -312,45 +272,79 @@ export function attachVideoControls(
 
   // Timeline scrubbing & tooltip
   const seekToPosition = (clientX: number) => {
-    const rect = timelineTrack.getBoundingClientRect();
+    const trackRect = timelineTrack.getBoundingClientRect();
+    const rect = trackRect.width > 0 ? trackRect : timelineContainer.getBoundingClientRect();
+    if (rect.width <= 0) return;
+
     const pos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const dur = video.duration || 0;
-    video.currentTime = pos * dur;
+    const dur = video.duration;
+    if (isFinite(dur) && dur > 0) {
+      const targetTime = Math.max(0, Math.min(dur, pos * dur));
+      try {
+        video.currentTime = targetTime;
+      } catch (err) {
+        // Fallback or ignore
+      }
+    }
     progressBar.style.width = `${pos * 100}%`;
     thumb.style.left = `${pos * 100}%`;
   };
 
-  timelineContainer.addEventListener('mousedown', (e) => {
+  const onPointerDown = (e: PointerEvent) => {
     e.stopPropagation();
     isScrubbing = true;
-    seekToPosition(e.clientX);
-
-    const onMouseMove = (moveEvent: MouseEvent) => {
-      if (isScrubbing) {
-        seekToPosition(moveEvent.clientX);
+    if (typeof (timelineContainer as any).setPointerCapture === 'function') {
+      try {
+        (timelineContainer as any).setPointerCapture(e.pointerId);
+      } catch {
+        // Ignore
       }
-    };
+    }
+    seekToPosition(e.clientX);
+  };
 
-    const onMouseUp = () => {
+  const onPointerMove = (e: PointerEvent) => {
+    if (isScrubbing) {
+      e.stopPropagation();
+      seekToPosition(e.clientX);
+    }
+
+    const trackRect = timelineTrack.getBoundingClientRect();
+    const rect = trackRect.width > 0 ? trackRect : timelineContainer.getBoundingClientRect();
+    if (rect.width > 0) {
+      const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const dur = video.duration || 0;
+      const hoverTime = pos * dur;
+      tooltip.textContent = formatTime(hoverTime);
+      tooltip.style.left = `${pos * 100}%`;
+      tooltip.style.display = 'block';
+    }
+  };
+
+  const onPointerUp = (e: PointerEvent) => {
+    if (isScrubbing) {
+      e.stopPropagation();
       isScrubbing = false;
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
+      if (typeof (timelineContainer as any).releasePointerCapture === 'function') {
+        try {
+          (timelineContainer as any).releasePointerCapture(e.pointerId);
+        } catch {
+          // Ignore
+        }
+      }
       scheduleAutoHide();
-    };
+    }
+  };
 
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-  });
+  timelineContainer.addEventListener('pointerdown', onPointerDown as any);
+  timelineContainer.addEventListener('pointermove', onPointerMove as any);
+  timelineContainer.addEventListener('pointerup', onPointerUp as any);
+  timelineContainer.addEventListener('pointercancel', onPointerUp as any);
 
-  timelineContainer.addEventListener('mousemove', (e) => {
-    const rect = timelineTrack.getBoundingClientRect();
-    const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const dur = video.duration || 0;
-    const hoverTime = pos * dur;
-
-    tooltip.textContent = formatTime(hoverTime);
-    tooltip.style.left = `${pos * 100}%`;
-    tooltip.style.display = 'block';
+  // Mouse fallback for click / mousedown
+  timelineContainer.addEventListener('click', (e) => {
+    e.stopPropagation();
+    seekToPosition(e.clientX);
   });
 
   timelineContainer.addEventListener('mouseleave', () => {
@@ -372,7 +366,6 @@ export function attachVideoControls(
     video.removeEventListener('play', onPlay);
     video.removeEventListener('pause', onPause);
     video.removeEventListener('timeupdate', onTimeUpdate);
-    video.removeEventListener('volumechange', onVolumeChange);
     video.removeEventListener('loadedmetadata', updateTimeline);
     mountPoint.removeEventListener('mousemove', onMouseMoveActivity);
     mountPoint.removeEventListener('mouseenter', onMouseMoveActivity);

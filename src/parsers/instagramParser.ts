@@ -150,6 +150,16 @@ export function parseInstagramMedia(raw: any): ExtractedMediaItem[] {
     }];
   }
 
+  // Modern Instagram Web GraphQL responses
+  const webInfoItems = raw.data?.xdt_api__v1__media__shortcode__web_info?.items;
+  if (Array.isArray(webInfoItems) && webInfoItems.length > 0) {
+    return webInfoItems.flatMap((item: any) => parseSingleInstagramItem(item));
+  }
+  const mediaInfoItems = raw.data?.xdt_api__v1__media_info?.items;
+  if (Array.isArray(mediaInfoItems) && mediaInfoItems.length > 0) {
+    return mediaInfoItems.flatMap((item: any) => parseSingleInstagramItem(item));
+  }
+
   // Handle arrays of feed items (e.g. /p/{code}/?__a=1&__d=dis or timeline endpoints)
   if (Array.isArray(raw.items) && raw.items.length > 0) {
     return raw.items.flatMap((item: any) => parseSingleInstagramItem(item));
@@ -160,9 +170,15 @@ export function parseInstagramMedia(raw: any): ExtractedMediaItem[] {
   if (Array.isArray(raw.data?.xdt_api__v1__feed__timeline?.edges)) {
     return raw.data.xdt_api__v1__feed__timeline.edges.flatMap((edge: any) => parseSingleInstagramItem(edge.node));
   }
+  if (Array.isArray(raw.data?.xdt_api__v1__clips__home__connection?.edges)) {
+    return raw.data.xdt_api__v1__clips__home__connection.edges.flatMap((edge: any) => parseSingleInstagramItem(edge.node?.media || edge.node));
+  }
+  if (Array.isArray(raw.data?.xdt_api__v1__feed__user_timeline_graphql_connection?.edges)) {
+    return raw.data.xdt_api__v1__feed__user_timeline_graphql_connection.edges.flatMap((edge: any) => parseSingleInstagramItem(edge.node));
+  }
 
   // Direct single item
-  const item = raw.media || raw.item || raw;
+  const item = raw.media || raw.item || raw.data?.media || raw;
   return parseSingleInstagramItem(item);
 }
 

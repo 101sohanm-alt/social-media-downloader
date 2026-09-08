@@ -87,14 +87,17 @@ describe('Video Controls Component (UI & Interactions)', () => {
     expect(video.pause).toHaveBeenCalled();
   });
 
-  it('omits 10s jump buttons and picture-in-picture button for a clean subtle single line', () => {
+  it('omits 10s jump buttons, picture-in-picture button, and volume control for a clean subtle single line', () => {
     attachVideoControls(video, container);
     expect(container.querySelector('.soc-ctrl-jump-back')).toBeNull();
     expect(container.querySelector('.soc-ctrl-jump-fwd')).toBeNull();
     expect(container.querySelector('.soc-pip-btn')).toBeNull();
+    expect(container.querySelector('.soc-volume-group')).toBeNull();
+    expect(container.querySelector('.soc-ctrl-volume-btn')).toBeNull();
+    expect(container.querySelector('.soc-ctrl-volume-slider')).toBeNull();
   });
 
-  it('renders all controls in a single horizontal row with inline volume on the right', () => {
+  it('renders all controls in a single horizontal row without volume controls', () => {
     attachVideoControls(video, container);
     const controls = container.querySelector('.soc-video-controls') as HTMLElement;
     expect(controls).not.toBeNull();
@@ -103,68 +106,60 @@ describe('Video Controls Component (UI & Interactions)', () => {
     const playBtn = controls.querySelector('.soc-ctrl-play');
     const timeDisplay = controls.querySelector('.soc-ctrl-time');
     const timeline = controls.querySelector('.soc-timeline-container');
-    const volumeGroup = controls.querySelector('.soc-volume-group');
     const speedBtn = controls.querySelector('.soc-ctrl-speed');
     const fullscreenBtn = controls.querySelector('.soc-fullscreen-btn');
 
     expect(playBtn).not.toBeNull();
     expect(timeDisplay).not.toBeNull();
     expect(timeline).not.toBeNull();
-    expect(volumeGroup).not.toBeNull();
     expect(speedBtn).not.toBeNull();
     expect(fullscreenBtn).not.toBeNull();
 
-    // Ensure volume slider is inside volumeGroup
-    const volSlider = volumeGroup?.querySelector('.soc-ctrl-volume-slider');
-    expect(volSlider).not.toBeNull();
+    // Ensure volume is completely absent
+    expect(controls.querySelector('.soc-volume-group')).toBeNull();
 
     // Ensure no multi-row wrappers exist
     expect(controls.querySelector('.soc-controls-row')).toBeNull();
   });
 
-  it('cycles playback speeds (0.5x, 0.75x, 1x, 1.25x, 1.5x, 2x)', () => {
+  it('seeks video when clicking or scrubbing along the timeline track', () => {
     attachVideoControls(video, container);
-    const speedBtn = container.querySelector('.soc-ctrl-speed') as HTMLButtonElement;
-    expect(speedBtn).not.toBeNull();
+    const timelineContainer = container.querySelector('.soc-timeline-container') as HTMLElement;
+    const timelineTrack = container.querySelector('.soc-timeline-track') as HTMLElement;
+    expect(timelineContainer).not.toBeNull();
+    expect(timelineTrack).not.toBeNull();
 
-    // Default rate is 1
-    expect(video.playbackRate).toBe(1);
+    // Mock bounding client rect for track
+    vi.spyOn(timelineTrack, 'getBoundingClientRect').mockReturnValue({
+      left: 100,
+      top: 0,
+      width: 200,
+      height: 4,
+      right: 300,
+      bottom: 4,
+      x: 100,
+      y: 0,
+      toJSON: () => {}
+    });
 
-    // Click cycles to 1.25x
-    speedBtn.click();
-    expect(video.playbackRate).toBe(1.25);
+    // Duration is 60s. Click at clientX = 200 (halfway: (200 - 100) / 200 = 0.5) -> should seek to 30s
+    const pointerDown = new Event('pointerdown', { bubbles: true, cancelable: true }) as any;
+    pointerDown.clientX = 200;
+    pointerDown.pointerId = 1;
+    if (timelineContainer.setPointerCapture) {
+      timelineContainer.setPointerCapture = vi.fn();
+    }
+    timelineContainer.dispatchEvent(pointerDown);
 
-    // Click to 1.5x
-    speedBtn.click();
-    expect(video.playbackRate).toBe(1.5);
+    expect(video.currentTime).toBe(30);
 
-    // Click to 2x
-    speedBtn.click();
-    expect(video.playbackRate).toBe(2);
+    // Scrub to clientX = 250 (75%: (250 - 100) / 200 = 0.75) -> should seek to 45s
+    const pointerMove = new Event('pointermove', { bubbles: true, cancelable: true }) as any;
+    pointerMove.clientX = 250;
+    pointerMove.pointerId = 1;
+    timelineContainer.dispatchEvent(pointerMove);
 
-    // Click to 0.5x
-    speedBtn.click();
-    expect(video.playbackRate).toBe(0.5);
-  });
-
-  it('toggles mute and handles volume slider', () => {
-    attachVideoControls(video, container);
-    const muteBtn = container.querySelector('.soc-ctrl-volume-btn') as HTMLButtonElement;
-    const volSlider = container.querySelector('.soc-ctrl-volume-slider') as HTMLInputElement;
-
-    expect(muteBtn).not.toBeNull();
-    expect(volSlider).not.toBeNull();
-
-    // Mute toggle
-    muteBtn.click();
-    expect(video.muted).toBe(true);
-    muteBtn.click();
-    expect(video.muted).toBe(false);
-
-    // Volume input
-    volSlider.value = '0.5';
-    volSlider.dispatchEvent(new Event('input'));
-    expect(video.volume).toBe(0.5);
+    expect(video.currentTime).toBe(45);
   });
 
   it('switches quality source when quality selector changes', () => {
