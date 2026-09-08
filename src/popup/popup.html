@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Social Media Downloader</title>
+  <link rel="stylesheet" href="./popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-branding">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3v12m0 0l4-4m-4 4l-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <div class="brand-title-row">
+            <h1>Omni Media</h1>
+            <span class="version-badge">v1.2</span>
+          </div>
+          <span class="brand-sub">Universal HD Downloader</span>
+        </div>
+      </div>
+      <div id="platform-badge" class="platform-badge platform-inactive">
+        <span class="badge-dot"></span>
+        <span id="platform-text">Ready</span>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+      <button id="tab-btn-home" class="nav-tab active" data-tab="tab-home">Quick Grab</button>
+      <button id="tab-btn-settings" class="nav-tab" data-tab="tab-settings">Settings</button>
+      <button id="tab-btn-history" class="nav-tab" data-tab="tab-history">History</button>
+    </nav>
+
+    <!-- Tab 1: Home / Quick Grab -->
+    <section id="tab-home" class="tab-pane active">
+      <div class="quick-status-card">
+        <div class="status-card-inner">
+          <span class="status-eyebrow">Active Detection</span>
+          <p class="status-desc" id="status-desc">Navigate to Instagram, X, or Reddit to download posts, carousels, and muxed audio/video directly from page action bars.</p>
+        </div>
+        <button id="btn-page-grab" class="primary-btn">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3v13m0 0l4-4m-4 4l-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+          </svg>
+          <span>Download Page Media</span>
+        </button>
+      </div>
+
+      <div class="manual-input-box">
+        <label for="input-url">Direct URL Lookup</label>
+        <div class="input-row">
+          <input type="text" id="input-url" placeholder="https://x.com/... or instagram.com/p/..." />
+          <button id="btn-fetch-url" class="secondary-btn">Grab</button>
+        </div>
+        <div id="fetch-status" class="fetch-status"></div>
+      </div>
+    </section>
+
+    <!-- Tab 2: Settings -->
+    <section id="tab-settings" class="tab-pane">
+      <div class="form-group">
+        <label for="setting-subfolder">Destination Subfolder</label>
+        <input type="text" id="setting-subfolder" placeholder="SocialDownloads" />
+        <span class="field-hint">Saved inside ~/Downloads/&lt;subfolder&gt;/</span>
+      </div>
+
+      <div class="form-group">
+        <label for="setting-template">Filename Template</label>
+        <input type="text" id="setting-template" placeholder="{platform}_{author}_{id}_{index}" />
+        <div class="tokens-container">
+          <button type="button" class="token-chip" data-token="{platform}">{platform}</button>
+          <button type="button" class="token-chip" data-token="{author}">{author}</button>
+          <button type="button" class="token-chip" data-token="{id}">{id}</button>
+          <button type="button" class="token-chip" data-token="{index}">{index}</button>
+          <button type="button" class="token-chip" data-token="{date}">{date}</button>
+        </div>
+      </div>
+
+      <div class="form-group toggle-group">
+        <div class="toggle-text-col">
+          <label for="setting-carousel" class="toggle-title">Auto-download full carousels</label>
+          <span class="field-hint">Save all photos & videos without single-item truncation</span>
+        </div>
+        <label class="switch-control" for="setting-carousel">
+          <input type="checkbox" id="setting-carousel" class="toggle-checkbox" checked />
+          <span class="switch-slider"></span>
+        </label>
+      </div>
+
+      <button id="btn-save-settings" class="primary-btn">Save Preferences</button>
+      <div id="settings-feedback" class="settings-feedback"></div>
+    </section>
+
+    <!-- Tab 3: History -->
+    <section id="tab-history" class="tab-pane">
+      <div class="history-header">
+        <span id="history-count" class="history-count-badge">0 items</span>
+        <button id="btn-clear-history" class="text-link">Clear</button>
+      </div>
+      <div id="history-list" class="history-list">
+        <div class="empty-state">No downloads yet</div>
+      </div>
+    </section>
+  </div>
+
+  <script type="module" src="./popup.ts"></script>
+</body>
+</html>

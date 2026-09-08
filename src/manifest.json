@@ -1,0 +1,73 @@
+{
+  "manifest_version": 3,
+  "name": "Social Media Downloader (Instagram, X, Reddit)",
+  "version": "1.0.0",
+  "description": "One-click high-resolution media downloader for Instagram, X (Twitter), and Reddit with DASH audio muxing.",
+  "permissions": [
+    "downloads",
+    "storage",
+    "offscreen",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "*://*.twitter.com/*",
+    "*://*.x.com/*",
+    "*://*.twimg.com/*",
+    "*://*.instagram.com/*",
+    "*://*.cdninstagram.com/*",
+    "*://*.reddit.com/*",
+    "*://*.redd.it/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.twitter.com/*",
+        "*://*.x.com/*",
+        "*://*.instagram.com/*",
+        "*://*.reddit.com/*"
+      ],
+      "js": ["content/main_interceptor.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "*://*.twitter.com/*",
+        "*://*.x.com/*",
+        "*://*.instagram.com/*",
+        "*://*.reddit.com/*"
+      ],
+      "js": ["content/isolated_bridge.js"],
+      "css": ["content/ui/styles.css"],
+      "run_at": "document_idle",
+      "world": "ISOLATED"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Social Media Downloader",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/ui/styles.css",
+        "offscreen/offscreen.html"
+      ],
+      "matches": ["*://*.twitter.com/*", "*://*.x.com/*", "*://*.instagram.com/*", "*://*.reddit.com/*"]
+    }
+  ]
+}

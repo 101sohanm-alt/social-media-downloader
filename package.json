@@ -1,0 +1,32 @@
+{
+  "name": "social-media-downloader",
+  "version": "1.0.0",
+  "description": "Chrome Extension (Manifest V3) to download media from Instagram, X (Twitter), and Reddit",
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "tsc --noEmit && node scripts/build.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "chrome-extension",
+    "downloader",
+    "instagram",
+    "twitter",
+    "reddit"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/chrome": "^0.0.280",
+    "@types/node": "^22.0.0",
+    "happy-dom": "^20.14.0",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0",
+    "vitest": "^2.0.0"
+  },
+  "dependencies": {
+    "mp4box": "^0.5.2"
+  }
+}

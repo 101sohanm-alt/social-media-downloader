@@ -1,0 +1,114 @@
+/* Scoped styles for Social Media Downloader injected buttons */
+.soc-dl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 9999px;
+  transition: background-color 0.2s ease, transform 0.15s ease, opacity 0.2s ease;
+  position: relative;
+  vertical-align: middle;
+  box-sizing: border-box;
+}
+
+.soc-dl-btn:hover {
+  background-color: rgba(29, 155, 240, 0.1);
+}
+
+.soc-dl-btn:active {
+  transform: scale(0.92);
+}
+
+.soc-dl-btn svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+  transition: fill 0.2s ease;
+}
+
+/* Instagram specific style */
+.soc-dl-btn.soc-instagram {
+  color: inherit;
+  margin-left: 8px;
+}
+
+.soc-dl-btn.soc-instagram:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  opacity: 0.8;
+}
+
+/* Twitter/X specific style */
+.soc-dl-btn.soc-twitter {
+  color: rgb(113, 118, 123);
+  margin-left: 4px;
+}
+
+.soc-dl-btn.soc-twitter:hover {
+  color: rgb(29, 155, 240);
+  background-color: rgba(29, 155, 240, 0.1);
+}
+
+/* Reddit specific style */
+.soc-dl-btn.soc-reddit {
+  color: inherit;
+  margin-left: 6px;
+  padding: 4px 8px;
+  border-radius: 9999px;
+}
+
+.soc-dl-btn.soc-reddit:hover {
+  background-color: rgba(255, 69, 0, 0.12);
+  color: #ff4500;
+}
+
+/* State animations */
+.soc-dl-btn.soc-loading svg {
+  animation: soc-spin 0.8s linear infinite;
+}
+
+.soc-dl-btn.soc-success {
+  color: #10b981 !important;
+}
+
+.soc-dl-btn.soc-error {
+  color: #ef4444 !important;
+}
+
+@keyframes soc-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.soc-tooltip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(15, 23, 42, 0.95);
+  color: #f8fafc;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 99999;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.soc-dl-btn:hover .soc-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(-2px);
+}
