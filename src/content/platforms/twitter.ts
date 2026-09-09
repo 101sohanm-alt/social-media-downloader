@@ -1,6 +1,5 @@
 import { ExtractedMediaItem } from '../../shared/types';
 import { createDownloadButton } from '../ui/button';
-import { openSelectionModal } from '../ui/selectionModal';
 import { toOrigTwimgUrl } from '../../parsers/twitterParser';
 
 export function setupTwitterInjector(
@@ -40,30 +39,9 @@ export function setupTwitterInjector(
           return;
         }
 
-        // Multi-media tweet: open selection modal
-        if (items.length > 1) {
-          updateState('idle');
-          openSelectionModal({
-            items,
-            onDownload: async (selectedItems) => {
-              updateState('loading', `Downloading ${selectedItems.length} item(s)...`);
-              const ok = await requestDownload(selectedItems, { forceAll: true });
-              if (ok) {
-                updateState('success', 'Saved!');
-              } else {
-                updateState('error', 'Download failed');
-              }
-            },
-            onCancel: () => {
-              updateState('idle');
-            }
-          });
-          return;
-        }
-
-        // Single media: instant 1-click download
-        updateState('loading', 'Downloading...');
-        const ok = await requestDownload(items);
+        const loadingText = items.length > 1 ? `Downloading ${items.length} items...` : 'Downloading...';
+        updateState('loading', loadingText);
+        const ok = await requestDownload(items, { forceAll: true });
         if (ok) {
           updateState('success', 'Saved!');
         } else {

@@ -1,7 +1,6 @@
 import { ExtractedMediaItem } from '../../shared/types';
 import { parseInstagramMedia } from '../../parsers/instagramParser';
 import { createDownloadButton } from '../ui/button';
-import { openSelectionModal } from '../ui/selectionModal';
 import { attachVideoControls } from '../ui/videoControls';
 
 function getBestFromSrcset(srcset: string): string | null {
@@ -231,30 +230,9 @@ export function setupInstagramInjector(
           return;
         }
 
-        // Multi-media: present thumbnail selection modal
-        if (items.length > 1) {
-          updateState('idle');
-          openSelectionModal({
-            items,
-            onDownload: async (selectedItems) => {
-              updateState('loading', `Downloading ${selectedItems.length} item(s)...`);
-              const ok = await requestDownload(selectedItems, { forceAll: true });
-              if (ok) {
-                updateState('success', 'Saved!');
-              } else {
-                updateState('error', 'Download failed');
-              }
-            },
-            onCancel: () => {
-              updateState('idle');
-            }
-          });
-          return;
-        }
-
-        // Single media: instant 1-click download
-        updateState('loading', 'Downloading...');
-        const ok = await requestDownload(items);
+        const loadingText = items.length > 1 ? `Downloading ${items.length} items...` : 'Downloading...';
+        updateState('loading', loadingText);
+        const ok = await requestDownload(items, { forceAll: true });
         if (ok) {
           updateState('success', 'Saved!');
         } else {

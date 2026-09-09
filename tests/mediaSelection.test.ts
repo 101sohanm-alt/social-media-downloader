@@ -2,8 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { parseInstagramMedia } from '../src/parsers/instagramParser';
 import { parseRedditMedia } from '../src/parsers/redditParser';
 import { parseTwitterMedia } from '../src/parsers/twitterParser';
-import { openSelectionModal } from '../src/content/ui/selectionModal';
 import { ExtractedMediaItem } from '../src/shared/types';
+import { setupInstagramInjector } from '../src/content/platforms/instagram';
+import { setupTwitterInjector } from '../src/content/platforms/twitter';
+import { setupRedditInjector } from '../src/content/platforms/reddit';
+import { normalizeBatchItems } from '../src/background/index';
 
 describe('Multi-Media Selection & Qualities - Parsers', () => {
   it('Instagram: extracts thumbnailUrl and multiple qualities for carousel and videos', () => {
@@ -171,135 +174,139 @@ describe('Multi-Media Selection & Qualities - Parsers', () => {
   });
 });
 
-describe('Selection Modal Component (UI)', () => {
+describe('Direct Bulk Downloads (No Modal)', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
+    vi.clearAllMocks();
   });
 
-  const mockItems: ExtractedMediaItem[] = [
-    {
-      id: 'post1',
-      platform: 'instagram',
-      type: 'image',
-      author: 'creator',
-      url: 'https://example.com/img1_orig.jpg',
-      thumbnailUrl: 'https://example.com/img1_thumb.jpg',
-      width: 1080,
-      height: 1350,
-      index: 1,
-      total: 2,
-    },
-    {
-      id: 'post1',
-      platform: 'instagram',
-      type: 'video',
-      author: 'creator',
-      url: 'https://example.com/vid2.mp4',
-      thumbnailUrl: 'https://example.com/vid2_thumb.jpg',
-      width: 720,
-      height: 1280,
-      index: 2,
-      total: 2,
-    },
-  ];
+  it('Instagram: multi-media post directly invokes requestDownload with forceAll: true and without modal', async () => {
+    const container = document.createElement('article');
+    const link = document.createElement('a');
+    link.href = 'https://www.instagram.com/p/TEST_IG_CODE/';
+    container.appendChild(link);
 
-  it('renders modal with cards, badges, and all items selected by default', () => {
-    const onDownload = vi.fn();
-    const onClose = vi.fn();
+    const shareBtn = document.createElement('button');
+    shareBtn.setAttribute('aria-label', 'Share Post');
+    container.appendChild(shareBtn);
 
-    openSelectionModal({
-      items: mockItems,
-      postTitle: 'Post by creator',
-      onDownload,
-      onClose,
-    });
+    document.body.appendChild(container);
 
-    const backdrop = document.querySelector('.soc-modal-backdrop');
-    expect(backdrop).not.toBeNull();
+    const mockItems: ExtractedMediaItem[] = [
+      { id: 'TEST_IG_CODE', platform: 'instagram', type: 'image', url: 'https://cdn.instagram.com/1.jpg' },
+      { id: 'TEST_IG_CODE', platform: 'instagram', type: 'image', url: 'https://cdn.instagram.com/2.jpg' },
+    ];
+    const mediaCache = new Map<string, ExtractedMediaItem[]>();
+    mediaCache.set('TEST_IG_CODE', mockItems);
 
-    const cards = document.querySelectorAll('.soc-card');
-    expect(cards).toHaveLength(2);
+    const requestDownloadMock = vi.fn().mockResolvedValue(true);
+    setupInstagramInjector(mediaCache, requestDownloadMock);
 
-    // Checkboxes checked by default
-    const checkboxes = document.querySelectorAll<HTMLInputElement>('.soc-card-checkbox');
-    expect(checkboxes).toHaveLength(2);
-    expect(checkboxes[0].checked).toBe(true);
-    expect(checkboxes[1].checked).toBe(true);
-
-    // Badges
-    const badges = document.querySelectorAll('.soc-badge-index');
-    expect(badges).toHaveLength(2);
-    expect(badges[0].textContent).toBe('#1');
-    expect(badges[1].textContent).toBe('#2');
-
-    // Type tags
-    const typeTags = document.querySelectorAll('.soc-badge-type');
-    expect(typeTags[0].textContent).toBe('IMAGE');
-    expect(typeTags[1].textContent).toBe('VIDEO');
-
-    // Download button initial count
-    const dlBtn = document.querySelector<HTMLButtonElement>('.soc-btn-download');
-    expect(dlBtn?.textContent).toContain('Download Selected (2)');
-    expect(dlBtn?.disabled).toBe(false);
-  });
-
-  it('handles Deselect All and Select All toggles', () => {
-    const onDownload = vi.fn();
-    openSelectionModal({ items: mockItems, onDownload });
-
-    const deselectBtn = document.querySelector<HTMLButtonElement>('.soc-btn-deselect-all')!;
-    const selectAllBtn = document.querySelector<HTMLButtonElement>('.soc-btn-select-all')!;
-    const dlBtn = document.querySelector<HTMLButtonElement>('.soc-btn-download')!;
-    const checkboxes = document.querySelectorAll<HTMLInputElement>('.soc-card-checkbox');
-
-    // Deselect All
-    deselectBtn.click();
-    expect(checkboxes[0].checked).toBe(false);
-    expect(checkboxes[1].checked).toBe(false);
-    expect(dlBtn.textContent).toContain('Download Selected (0)');
-    expect(dlBtn.disabled).toBe(true);
-
-    // Select All
-    selectAllBtn.click();
-    expect(checkboxes[0].checked).toBe(true);
-    expect(checkboxes[1].checked).toBe(true);
-    expect(dlBtn.textContent).toContain('Download Selected (2)');
-    expect(dlBtn.disabled).toBe(false);
-  });
-
-  it('downloads selected subset when user unchecks an item and clicks download', () => {
-    const onDownload = vi.fn();
-    openSelectionModal({ items: mockItems, onDownload });
-
-    const checkboxes = document.querySelectorAll<HTMLInputElement>('.soc-card-checkbox');
-    // Uncheck second item
-    checkboxes[1].click();
-
-    const dlBtn = document.querySelector<HTMLButtonElement>('.soc-btn-download')!;
-    expect(dlBtn.textContent).toContain('Download Selected (1)');
+    const dlBtn = container.querySelector('.soc-dl-btn') as HTMLButtonElement;
+    expect(dlBtn).not.toBeNull();
 
     dlBtn.click();
-    expect(onDownload).toHaveBeenCalledTimes(1);
-    expect(onDownload).toHaveBeenCalledWith([mockItems[0]]);
+    await vi.waitFor(() => {
+      expect(requestDownloadMock).toHaveBeenCalledTimes(1);
+    });
 
-    // Modal removed
+    expect(requestDownloadMock).toHaveBeenCalledWith(mockItems, { forceAll: true });
+    expect(document.querySelector('.soc-selection-modal')).toBeNull();
     expect(document.querySelector('.soc-modal-backdrop')).toBeNull();
   });
 
-  it('closes modal on close button click and on Escape key', () => {
-    const onClose = vi.fn();
-    openSelectionModal({ items: mockItems, onDownload: vi.fn(), onClose });
+  it('Twitter: multi-media tweet directly invokes requestDownload with forceAll: true and without modal', async () => {
+    const tweet = document.createElement('article');
+    tweet.setAttribute('data-testid', 'tweet');
+    const group = document.createElement('div');
+    group.setAttribute('role', 'group');
+    tweet.appendChild(group);
 
-    expect(document.querySelector('.soc-modal-backdrop')).not.toBeNull();
-    const closeBtn = document.querySelector<HTMLButtonElement>('.soc-modal-close')!;
-    closeBtn.click();
-    expect(document.querySelector('.soc-modal-backdrop')).toBeNull();
-    expect(onClose).toHaveBeenCalled();
+    const link = document.createElement('a');
+    link.href = 'https://twitter.com/user/status/987654321';
+    tweet.appendChild(link);
+    document.body.appendChild(tweet);
 
-    // Reopen and test Escape
-    openSelectionModal({ items: mockItems, onDownload: vi.fn() });
-    expect(document.querySelector('.soc-modal-backdrop')).not.toBeNull();
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    const mockItems: ExtractedMediaItem[] = [
+      { id: '987654321', platform: 'twitter', type: 'image', url: 'https://pbs.twimg.com/media/1.jpg' },
+      { id: '987654321', platform: 'twitter', type: 'image', url: 'https://pbs.twimg.com/media/2.jpg' },
+    ];
+    const mediaCache = new Map<string, ExtractedMediaItem[]>();
+    mediaCache.set('987654321', mockItems);
+
+    const requestDownloadMock = vi.fn().mockResolvedValue(true);
+    setupTwitterInjector(mediaCache, requestDownloadMock);
+
+    const dlBtn = group.querySelector('.soc-dl-btn') as HTMLButtonElement;
+    expect(dlBtn).not.toBeNull();
+
+    dlBtn.click();
+    await vi.waitFor(() => {
+      expect(requestDownloadMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(requestDownloadMock).toHaveBeenCalledWith(mockItems, { forceAll: true });
+    expect(document.querySelector('.soc-selection-modal')).toBeNull();
     expect(document.querySelector('.soc-modal-backdrop')).toBeNull();
+  });
+
+  it('Reddit: multi-media gallery directly invokes requestDownload with forceAll: true and without modal', async () => {
+    const post = document.createElement('shreddit-post');
+    post.setAttribute('id', 't3_red_gallery');
+    const actionRow = document.createElement('div');
+    actionRow.setAttribute('slot', 'action-row');
+    post.appendChild(actionRow);
+    document.body.appendChild(post);
+
+    const mockItems: ExtractedMediaItem[] = [
+      { id: 'red_gallery', platform: 'reddit', type: 'image', url: 'https://preview.redd.it/1.jpg' },
+      { id: 'red_gallery', platform: 'reddit', type: 'image', url: 'https://preview.redd.it/2.jpg' },
+    ];
+    const mediaCache = new Map<string, ExtractedMediaItem[]>();
+    mediaCache.set('red_gallery', mockItems);
+
+    const requestDownloadMock = vi.fn().mockResolvedValue(true);
+    setupRedditInjector(mediaCache, requestDownloadMock);
+
+    const dlBtn = actionRow.querySelector('.soc-dl-btn') as HTMLButtonElement;
+    expect(dlBtn).not.toBeNull();
+
+    dlBtn.click();
+    await vi.waitFor(() => {
+      expect(requestDownloadMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(requestDownloadMock).toHaveBeenCalledWith(mockItems, { forceAll: true });
+    expect(document.querySelector('.soc-selection-modal')).toBeNull();
+    expect(document.querySelector('.soc-modal-backdrop')).toBeNull();
+  });
+
+  it('Normalizes multi-media batch items with sequential index and total tokens', () => {
+    const rawBatch: ExtractedMediaItem[] = [
+      { id: 'batch_1', platform: 'instagram', type: 'image', url: 'https://cdn.example.com/1.jpg' },
+      { id: 'batch_1', platform: 'instagram', type: 'image', url: 'https://cdn.example.com/2.jpg' },
+      { id: 'batch_1', platform: 'instagram', type: 'video', url: 'https://cdn.example.com/3.mp4' },
+    ];
+
+    const normalized = normalizeBatchItems(rawBatch);
+    expect(normalized).toHaveLength(3);
+    expect(normalized[0].index).toBe(1);
+    expect(normalized[0].total).toBe(3);
+    expect(normalized[1].index).toBe(2);
+    expect(normalized[1].total).toBe(3);
+    expect(normalized[2].index).toBe(3);
+    expect(normalized[2].total).toBe(3);
+
+    // Preserves existing index/total if already set
+    const partialBatch: ExtractedMediaItem[] = [
+      { id: 'batch_2', platform: 'twitter', type: 'image', url: 'https://cdn.example.com/a.jpg', index: 5, total: 10 },
+      { id: 'batch_2', platform: 'twitter', type: 'image', url: 'https://cdn.example.com/b.jpg' },
+    ];
+    const partialNormalized = normalizeBatchItems(partialBatch);
+    expect(partialNormalized[0].index).toBe(5);
+    expect(partialNormalized[0].total).toBe(10);
+    expect(partialNormalized[1].index).toBe(2);
+    expect(partialNormalized[1].total).toBe(2);
   });
 });
+

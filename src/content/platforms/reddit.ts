@@ -1,6 +1,5 @@
 import { ExtractedMediaItem, MediaQuality } from '../../shared/types';
 import { createDownloadButton } from '../ui/button';
-import { openSelectionModal } from '../ui/selectionModal';
 import { attachVideoControls } from '../ui/videoControls';
 import { parseRedditMedia } from '../../parsers/redditParser';
 
@@ -55,31 +54,9 @@ export function setupRedditInjector(
           return;
         }
 
-        // Multi-media gallery: open selection modal
-        if (items.length > 1) {
-          updateState('idle');
-          openSelectionModal({
-            items,
-            postTitle: items[0].title || 'Reddit Gallery',
-            onDownload: async (selected) => {
-              updateState('loading', `Downloading ${selected.length} item(s)...`);
-              const ok = await requestDownload(selected, { forceAll: true });
-              if (ok) {
-                updateState('success', 'Saved!');
-              } else {
-                updateState('error', 'Download failed');
-              }
-            },
-            onCancel: () => {
-              updateState('idle');
-            }
-          });
-          return;
-        }
-
-        // Single media item: instant 1-click download
-        updateState('loading', 'Downloading...');
-        const ok = await requestDownload(items);
+        const loadingText = items.length > 1 ? `Downloading ${items.length} items...` : 'Downloading...';
+        updateState('loading', loadingText);
+        const ok = await requestDownload(items, { forceAll: true });
         if (ok) {
           updateState('success', 'Saved!');
         } else {

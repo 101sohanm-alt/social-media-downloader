@@ -7,7 +7,19 @@ import {
   downloadMediaItem
 } from './downloadManager';
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+export function normalizeBatchItems(items: ExtractedMediaItem[]): ExtractedMediaItem[] {
+  if (items.length <= 1) {
+    return items;
+  }
+  return items.map((item, i) => ({
+    ...item,
+    index: item.index ?? i + 1,
+    total: item.total ?? items.length
+  }));
+}
+
+if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.action === 'DOWNLOAD_MEDIA') {
     (async () => {
       const items = (message.items as ExtractedMediaItem[]) || [];
@@ -17,16 +29,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
 
       const settings = await getSettings();
-      const toDownload = (message.forceAll || message.explicit)
+      const rawDownload = (message.forceAll || message.explicit)
         ? items
         : (settings.autoDownloadAllCarousel ? items : [items[0]]);
+      const toDownload = normalizeBatchItems(rawDownload);
 
       let successCount = 0;
-      for (const item of toDownload) {
+      for (let i = 0; i < toDownload.length; i++) {
+        const item = toDownload[i];
         const ok = await downloadMediaItem(item, settings);
         if (ok) successCount++;
-        // Short delay between multi-downloads
-        if (toDownload.length > 1) {
+        // Short delay between multi-downloads (only between items)
+        if (toDownload.length > 1 && i < toDownload.length - 1) {
           await new Promise((r) => setTimeout(r, 250));
         }
       }
@@ -60,3 +74,5 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 });
+}
+

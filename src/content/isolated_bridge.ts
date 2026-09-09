@@ -28,7 +28,7 @@ import { setupRedditInjector } from './platforms/reddit';
     items: ExtractedMediaItem[],
     options?: { forceAll?: boolean }
   ): Promise<boolean> {
-    const isForceAll = Boolean(options?.forceAll);
+    const isForceAll = options?.forceAll ?? true;
     try {
       const res = await chrome.runtime.sendMessage({
         action: 'DOWNLOAD_MEDIA',

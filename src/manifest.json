@@ -15,6 +15,7 @@
     "*://*.twimg.com/*",
     "*://*.instagram.com/*",
     "*://*.cdninstagram.com/*",
+    "*://*.fbcdn.net/*",
     "*://*.reddit.com/*",
     "*://*.redd.it/*"
   ],
