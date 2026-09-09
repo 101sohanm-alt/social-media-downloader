@@ -7,6 +7,7 @@ import { setupInstagramInjector } from '../src/content/platforms/instagram';
 import { setupTwitterInjector } from '../src/content/platforms/twitter';
 import { setupRedditInjector } from '../src/content/platforms/reddit';
 import { normalizeBatchItems } from '../src/background/index';
+import { openPickerModal, closePickerModal } from '../src/content/ui/pickerModal';
 
 describe('Multi-Media Selection & Qualities - Parsers', () => {
   it('Instagram: extracts thumbnailUrl and multiple qualities for carousel and videos', () => {
@@ -174,13 +175,18 @@ describe('Multi-Media Selection & Qualities - Parsers', () => {
   });
 });
 
-describe('Direct Bulk Downloads (No Modal)', () => {
+describe('Media Picker Modal (multi-item selection)', () => {
   beforeEach(() => {
+    closePickerModal();
     document.body.innerHTML = '';
     vi.clearAllMocks();
   });
 
-  it('Instagram: multi-media post directly invokes requestDownload with forceAll: true and without modal', async () => {
+  function pickerButtons(): HTMLButtonElement[] {
+    return Array.from(document.querySelectorAll('.soc-picker-btn')) as HTMLButtonElement[];
+  }
+
+  it('Instagram: multi-media post opens picker with one tile per item and downloads nothing yet', async () => {
     const container = document.createElement('article');
     const link = document.createElement('a');
     link.href = 'https://www.instagram.com/p/TEST_IG_CODE/';
@@ -207,15 +213,112 @@ describe('Direct Bulk Downloads (No Modal)', () => {
 
     dlBtn.click();
     await vi.waitFor(() => {
+      expect(document.querySelector('.soc-picker-backdrop')).not.toBeNull();
+    });
+
+    // One tile per item — nothing downloaded yet
+    expect(document.querySelectorAll('.soc-picker-tile')).toHaveLength(2);
+    expect(requestDownloadMock).not.toHaveBeenCalled();
+    expect(document.querySelector('.soc-picker-count')?.textContent).toContain('2 of 2');
+
+    // "Download all" downloads every item and closes the picker
+    pickerButtons()[1].click();
+    await vi.waitFor(() => {
+      expect(requestDownloadMock).toHaveBeenCalledTimes(1);
+    });
+    expect(requestDownloadMock).toHaveBeenCalledWith(mockItems, { forceAll: true });
+    expect(document.querySelector('.soc-picker-backdrop')).toBeNull();
+  });
+
+  it('Picker: deselecting a tile downloads only the selected subset', async () => {
+    const mockItems: ExtractedMediaItem[] = [
+      { id: 'pick_1', platform: 'instagram', type: 'image', url: 'https://cdn.instagram.com/1.jpg', thumbnailUrl: 'https://cdn.instagram.com/t1.jpg' },
+      { id: 'pick_1', platform: 'instagram', type: 'image', url: 'https://cdn.instagram.com/2.jpg', thumbnailUrl: 'https://cdn.instagram.com/t2.jpg' },
+      { id: 'pick_1', platform: 'instagram', type: 'video', url: 'https://cdn.instagram.com/3.mp4' },
+    ];
+    const onDownload = vi.fn();
+    openPickerModal({ items: mockItems, onDownload });
+
+    const tiles = document.querySelectorAll('.soc-picker-tile');
+    expect(tiles).toHaveLength(3);
+
+    // Deselect the first tile
+    (tiles[0] as HTMLButtonElement).click();
+    expect(document.querySelector('.soc-picker-count')?.textContent).toContain('2 of 3');
+
+    pickerButtons()[0].click(); // "Download selected"
+    expect(onDownload).toHaveBeenCalledTimes(1);
+    expect(onDownload).toHaveBeenCalledWith([mockItems[1], mockItems[2]]);
+    expect(document.querySelector('.soc-picker-backdrop')).toBeNull();
+  });
+
+  it('Picker: every item gets a tile even without a thumbnail, and Escape dismisses without downloading', () => {
+    const mockItems: ExtractedMediaItem[] = [
+      { id: 'pick_2', platform: 'twitter', type: 'video', url: 'https://video.twimg.com/v.mp4' },
+      { id: 'pick_2', platform: 'twitter', type: 'image', url: 'https://pbs.twimg.com/media/1.jpg' },
+    ];
+    const onDownload = vi.fn();
+    openPickerModal({ items: mockItems, onDownload });
+
+    // No thumbnails at all — still one tile per item via numbered placeholders
+    expect(document.querySelectorAll('.soc-picker-tile')).toHaveLength(2);
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(document.querySelector('.soc-picker-backdrop')).toBeNull();
+    expect(onDownload).not.toHaveBeenCalled();
+  });
+
+  it('Picker: Select-all / Clear toggle and empty selection disables download', () => {
+    const mockItems: ExtractedMediaItem[] = [
+      { id: 'pick_3', platform: 'reddit', type: 'image', url: 'https://preview.redd.it/1.jpg' },
+      { id: 'pick_3', platform: 'reddit', type: 'image', url: 'https://preview.redd.it/2.jpg' },
+    ];
+    openPickerModal({ items: mockItems, onDownload: vi.fn() });
+
+    const links = Array.from(document.querySelectorAll('.soc-picker-link')) as HTMLButtonElement[];
+    links[1].click(); // Clear
+    expect(document.querySelector('.soc-picker-count')?.textContent).toContain('0 of 2');
+    expect(pickerButtons()[0].disabled).toBe(true);
+
+    links[0].click(); // Select all
+    expect(document.querySelector('.soc-picker-count')?.textContent).toContain('2 of 2');
+    expect(pickerButtons()[0].disabled).toBe(false);
+  });
+
+  it('Instagram: single-item post bypasses the picker and downloads directly', async () => {
+    const container = document.createElement('article');
+    const link = document.createElement('a');
+    link.href = 'https://www.instagram.com/p/SINGLE_IG_CODE/';
+    container.appendChild(link);
+
+    const shareBtn = document.createElement('button');
+    shareBtn.setAttribute('aria-label', 'Share Post');
+    container.appendChild(shareBtn);
+
+    document.body.appendChild(container);
+
+    const mockItems: ExtractedMediaItem[] = [
+      { id: 'SINGLE_IG_CODE', platform: 'instagram', type: 'image', url: 'https://cdn.instagram.com/only.jpg' },
+    ];
+    const mediaCache = new Map<string, ExtractedMediaItem[]>();
+    mediaCache.set('SINGLE_IG_CODE', mockItems);
+
+    const requestDownloadMock = vi.fn().mockResolvedValue(true);
+    setupInstagramInjector(mediaCache, requestDownloadMock);
+
+    const dlBtn = container.querySelector('.soc-dl-btn') as HTMLButtonElement;
+    expect(dlBtn).not.toBeNull();
+
+    dlBtn.click();
+    await vi.waitFor(() => {
       expect(requestDownloadMock).toHaveBeenCalledTimes(1);
     });
 
     expect(requestDownloadMock).toHaveBeenCalledWith(mockItems, { forceAll: true });
-    expect(document.querySelector('.soc-selection-modal')).toBeNull();
-    expect(document.querySelector('.soc-modal-backdrop')).toBeNull();
+    expect(document.querySelector('.soc-picker-backdrop')).toBeNull();
   });
 
-  it('Twitter: multi-media tweet directly invokes requestDownload with forceAll: true and without modal', async () => {
+  it('Twitter: multi-media tweet opens the picker instead of bulk-downloading', async () => {
     const tweet = document.createElement('article');
     tweet.setAttribute('data-testid', 'tweet');
     const group = document.createElement('div');
@@ -242,15 +345,22 @@ describe('Direct Bulk Downloads (No Modal)', () => {
 
     dlBtn.click();
     await vi.waitFor(() => {
+      expect(document.querySelector('.soc-picker-backdrop')).not.toBeNull();
+    });
+
+    expect(document.querySelectorAll('.soc-picker-tile')).toHaveLength(2);
+    expect(requestDownloadMock).not.toHaveBeenCalled();
+
+    pickerButtons()[1].click(); // "Download all"
+    await vi.waitFor(() => {
       expect(requestDownloadMock).toHaveBeenCalledTimes(1);
     });
 
     expect(requestDownloadMock).toHaveBeenCalledWith(mockItems, { forceAll: true });
-    expect(document.querySelector('.soc-selection-modal')).toBeNull();
-    expect(document.querySelector('.soc-modal-backdrop')).toBeNull();
+    expect(document.querySelector('.soc-picker-backdrop')).toBeNull();
   });
 
-  it('Reddit: multi-media gallery directly invokes requestDownload with forceAll: true and without modal', async () => {
+  it('Reddit: multi-media gallery opens the picker instead of bulk-downloading', async () => {
     const post = document.createElement('shreddit-post');
     post.setAttribute('id', 't3_red_gallery');
     const actionRow = document.createElement('div');
@@ -273,12 +383,19 @@ describe('Direct Bulk Downloads (No Modal)', () => {
 
     dlBtn.click();
     await vi.waitFor(() => {
+      expect(document.querySelector('.soc-picker-backdrop')).not.toBeNull();
+    });
+
+    expect(document.querySelectorAll('.soc-picker-tile')).toHaveLength(2);
+    expect(requestDownloadMock).not.toHaveBeenCalled();
+
+    pickerButtons()[1].click(); // "Download all"
+    await vi.waitFor(() => {
       expect(requestDownloadMock).toHaveBeenCalledTimes(1);
     });
 
     expect(requestDownloadMock).toHaveBeenCalledWith(mockItems, { forceAll: true });
-    expect(document.querySelector('.soc-selection-modal')).toBeNull();
-    expect(document.querySelector('.soc-modal-backdrop')).toBeNull();
+    expect(document.querySelector('.soc-picker-backdrop')).toBeNull();
   });
 
   it('Normalizes multi-media batch items with sequential index and total tokens', () => {

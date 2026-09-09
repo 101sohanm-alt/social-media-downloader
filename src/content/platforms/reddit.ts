@@ -1,5 +1,6 @@
 import { ExtractedMediaItem, MediaQuality } from '../../shared/types';
 import { createDownloadButton } from '../ui/button';
+import { openPickerModal } from '../ui/pickerModal';
 import { attachVideoControls } from '../ui/videoControls';
 import { parseRedditMedia } from '../../parsers/redditParser';
 
@@ -54,8 +55,21 @@ export function setupRedditInjector(
           return;
         }
 
-        const loadingText = items.length > 1 ? `Downloading ${items.length} items...` : 'Downloading...';
-        updateState('loading', loadingText);
+        if (items.length > 1) {
+          updateState('idle');
+          openPickerModal({
+            items,
+            onDownload: async (selected) => {
+              updateState('loading', `Downloading ${selected.length} item(s)...`);
+              const ok = await requestDownload(selected, { forceAll: true });
+              updateState(ok ? 'success' : 'error', ok ? 'Saved!' : 'Download failed');
+            },
+            onClose: () => updateState('idle')
+          });
+          return;
+        }
+
+        updateState('loading', 'Downloading...');
         const ok = await requestDownload(items, { forceAll: true });
         if (ok) {
           updateState('success', 'Saved!');

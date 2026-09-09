@@ -1,6 +1,7 @@
 import { ExtractedMediaItem } from '../../shared/types';
 import { parseInstagramMedia } from '../../parsers/instagramParser';
 import { createDownloadButton } from '../ui/button';
+import { openPickerModal } from '../ui/pickerModal';
 import { attachVideoControls } from '../ui/videoControls';
 
 function getBestFromSrcset(srcset: string): string | null {
@@ -230,8 +231,43 @@ export function setupInstagramInjector(
           return;
         }
 
-        const loadingText = items.length > 1 ? `Downloading ${items.length} items...` : 'Downloading...';
-        updateState('loading', loadingText);
+        // Completeness gate: carousel clues promise more slides than we
+        // resolved — make one final attempt before presenting anything, so
+        // the picker never opens on a silently partial set.
+        if (hasCarouselClues && items.length < expectedTotal) {
+          updateState('loading', 'Loading all slides...');
+          window.dispatchEvent(
+            new CustomEvent('__SOC_REQUEST_FIBER_MEDIA__', { detail: { shortcode } })
+          );
+          await new Promise((r) => setTimeout(r, 300));
+          if (shortcode) {
+            const retry = mediaCache.get(shortcode);
+            if (retry && retry.length > items.length) items = retry;
+          }
+          if (items.length < expectedTotal && shortcode) {
+            const refetched = await fetchInstagramPostJson(shortcode);
+            if (refetched && refetched.length > items.length) {
+              items = refetched;
+              mediaCache.set(shortcode, items);
+            }
+          }
+        }
+
+        if (items.length > 1) {
+          updateState('idle');
+          openPickerModal({
+            items,
+            onDownload: async (selected) => {
+              updateState('loading', `Downloading ${selected.length} item(s)...`);
+              const ok = await requestDownload(selected, { forceAll: true });
+              updateState(ok ? 'success' : 'error', ok ? 'Saved!' : 'Download failed');
+            },
+            onClose: () => updateState('idle')
+          });
+          return;
+        }
+
+        updateState('loading', 'Downloading...');
         const ok = await requestDownload(items, { forceAll: true });
         if (ok) {
           updateState('success', 'Saved!');

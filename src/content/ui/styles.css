@@ -421,15 +421,211 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
-.soc-ctrl-volume-slider::-moz-range-thumb {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #ffffff;
-  cursor: pointer;
-  border: none;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+/* ==========================================================================
+   Media Picker Modal (multi-item download selection)
+   ========================================================================== */
+.soc-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
+
+.soc-picker {
+  background: rgba(9, 9, 11, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  color: #fafafa;
+  width: 420px;
+  max-width: 100%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.soc-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.soc-picker-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.soc-picker-close {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.soc-picker-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.soc-picker-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+}
+
+.soc-picker-link {
+  background: transparent;
+  border: none;
+  color: #7dd3fc;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 0;
+}
+
+.soc-picker-link:hover {
+  text-decoration: underline;
+}
+
+.soc-picker-count {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+
+.soc-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+  padding: 4px 14px 12px;
+  overflow-y: auto;
+}
+
+.soc-picker-tile {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.soc-picker-tile.soc-selected {
+  border-color: #fafafa;
+}
+
+.soc-picker-thumb-fallback {
+  font-size: 24px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.35);
+  font-variant-numeric: tabular-nums;
+}
+
+.soc-picker-thumb {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.soc-picker-tile:not(.soc-selected) .soc-picker-thumb {
+  opacity: 0.35;
+  filter: grayscale(60%);
+}
+
+.soc-picker-badge {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  font-size: 10px;
+  background: rgba(0, 0, 0, 0.65);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: #fff;
+  pointer-events: none;
+}
+
+.soc-picker-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1.5px solid rgba(255, 255, 255, 0.7);
+  color: transparent;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.soc-picker-tile.soc-selected .soc-picker-check {
+  background: #fafafa;
+  border-color: #fafafa;
+  color: #09090b;
+}
+
+.soc-picker-footer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.soc-picker-btn {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fafafa;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.soc-picker-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.soc-picker-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.soc-picker-btn.soc-picker-primary {
+  background: #fafafa;
+  border-color: #fafafa;
+  color: #09090b;
+}
+
+.soc-picker-btn.soc-picker-primary:hover:not(:disabled) {
+  background: #e4e4e7;
+}
+
 
 
 
