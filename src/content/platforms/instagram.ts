@@ -1,5 +1,6 @@
 import { ExtractedMediaItem } from '../../shared/types';
 import { parseInstagramMedia } from '../../parsers/instagramParser';
+import { mergeMediaItems } from '../../shared/mergeMedia';
 import { createDownloadButton } from '../ui/button';
 import { openPickerModal } from '../ui/pickerModal';
 import { attachVideoControls } from '../ui/videoControls';
@@ -13,6 +14,142 @@ function getBestFromSrcset(srcset: string): string | null {
   });
   entries.sort((a, b) => b.width - a.width);
   return entries[0]?.url || null;
+}
+
+const SWIPE_NEXT_SELECTORS = [
+  'button[aria-label*="Next" i]',
+  '[role="button"][aria-label*="Next" i]',
+  'button[aria-label*="Suivant" i]',
+  'button[aria-label*="Weiter" i]',
+  'button[aria-label*="Siguiente" i]'
+];
+
+const SWIPE_PREV_SELECTORS = [
+  'button[aria-label*="Previous" i]',
+  '[role="button"][aria-label*="Previous" i]',
+  'button[aria-label*="Précédent" i]',
+  'button[aria-label*="Zurück" i]',
+  'button[aria-label*="Anterior" i]'
+];
+
+function findSwipeButton(container: HTMLElement, selectors: string[]): HTMLElement | null {
+  for (const sel of selectors) {
+    const el = container.querySelector(sel) as HTMLElement | null;
+    if (!el) continue;
+    if ((el as HTMLButtonElement).disabled) continue;
+    if (el.getAttribute('aria-disabled') === 'true') continue;
+    return el;
+  }
+  return null;
+}
+
+/**
+ * Collect the photo slides currently rendered inside a carousel container.
+ * Unlike extractFromDom this never drops images just because layout rects
+ * are unavailable — only provably-tiny rendered images are excluded.
+ */
+export function collectCarouselSlideImages(
+  container: HTMLElement,
+  id: string,
+  author: string
+): ExtractedMediaItem[] {
+  const results: ExtractedMediaItem[] = [];
+  const images = Array.from(
+    container.querySelectorAll('img[src*="cdninstagram.com"], img[src*="fbcdn.net"]')
+  ) as HTMLImageElement[];
+  for (const img of images) {
+    if (img.closest('header, [role="button"], a[role="link"][tabindex="0"]')) continue;
+    if (typeof img.getBoundingClientRect === 'function') {
+      const rect = img.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0 && (rect.width <= 150 || rect.height <= 150)) continue;
+    }
+    const src = img.currentSrc || img.src;
+    if (!src) continue;
+    results.push({
+      id,
+      platform: 'instagram',
+      type: 'image',
+      author,
+      url: getBestFromSrcset(img.srcset) || src,
+      ext: '.jpg',
+      thumbnailUrl: src
+    });
+  }
+  return results;
+}
+
+export interface SwipeCollectOptions {
+  expectedTotal?: number;
+  delayMs?: number;
+  maxAdvances?: number;
+}
+
+/**
+ * Last-resort recovery for photo carousels: step through the carousel with
+ * its own Next button, collecting each rendered slide, then navigate back
+ * to the starting position. Returns the union of `existing` and everything
+ * found (never fewer items than `existing`).
+ */
+export async function collectCarouselSlidesBySwiping(
+  container: HTMLElement,
+  shortcode: string,
+  existing: ExtractedMediaItem[],
+  options?: SwipeCollectOptions
+): Promise<ExtractedMediaItem[]> {
+  // expectedTotal of 1 means "unknown" (no counter found in the DOM),
+  // never a real one-slide total — only a larger count is trustworthy.
+  const rawExpected = options?.expectedTotal ?? 0;
+  const expectedTotal = rawExpected > 1 ? rawExpected : 0;
+  const delayMs = options?.delayMs ?? 350;
+  const maxAdvances = options?.maxAdvances ?? 20;
+
+  const id = shortcode || existing[0]?.id || String(Date.now());
+  const author =
+    existing[0]?.author ||
+    container.querySelector('header a')?.textContent?.trim() ||
+    'instagram_user';
+
+  const seen = new Map<string, ExtractedMediaItem>();
+  const absorb = (list: ExtractedMediaItem[]) => {
+    for (const item of list) {
+      if (item?.url && !seen.has(item.url)) seen.set(item.url, item);
+    }
+  };
+  absorb(existing);
+  absorb(collectCarouselSlideImages(container, id, author));
+
+  let advances = 0;
+  let staleRounds = 0;
+  while (advances < maxAdvances) {
+    if (expectedTotal > 0 && seen.size >= expectedTotal) break;
+    const next = findSwipeButton(container, SWIPE_NEXT_SELECTORS);
+    if (!next) break;
+    const before = seen.size;
+    next.click();
+    advances++;
+    await new Promise((r) => setTimeout(r, delayMs));
+    absorb(collectCarouselSlideImages(container, id, author));
+    if (seen.size === before) {
+      staleRounds++;
+      if (staleRounds >= 2) break;
+    } else {
+      staleRounds = 0;
+    }
+  }
+
+  // Restore the starting slide (best effort — never fail the download).
+  try {
+    for (let i = 0; i < advances; i++) {
+      const prev = findSwipeButton(container, SWIPE_PREV_SELECTORS);
+      if (!prev) break;
+      prev.click();
+      await new Promise((r) => setTimeout(r, 120));
+    }
+  } catch {
+    // Ignore
+  }
+
+  return mergeMediaItems(existing, [...seen.values()]);
 }
 
 export function setupInstagramInjector(
@@ -250,6 +387,21 @@ export function setupInstagramInjector(
               items = refetched;
               mediaCache.set(shortcode, items);
             }
+          }
+        }
+
+        // Last resort for photo carousels: step through the slides with the
+        // carousel's own Next button and collect each rendered slide.
+        // Skipped for video-only posts — their media cannot be recovered
+        // from the DOM and posters must not be mistaken for photos.
+        const canSwipeCollect =
+          items.some((i) => i.type === 'image') || !container.querySelector('video');
+        if (hasCarouselClues && (items.length < expectedTotal || items.length <= 3) && canSwipeCollect) {
+          updateState('loading', 'Reading all slides...');
+          const swiped = await collectCarouselSlidesBySwiping(container, shortcode, items, { expectedTotal });
+          if (swiped.length > items.length) {
+            items = swiped;
+            if (shortcode) mediaCache.set(shortcode, items);
           }
         }
 

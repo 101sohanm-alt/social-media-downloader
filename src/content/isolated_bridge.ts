@@ -1,4 +1,5 @@
 import { ExtractedMediaItem } from '../shared/types';
+import { mergeMediaItems } from '../shared/mergeMedia';
 import { setupTwitterInjector } from './platforms/twitter';
 import { setupInstagramInjector } from './platforms/instagram';
 import { setupRedditInjector } from './platforms/reddit';
@@ -19,7 +20,10 @@ import { setupRedditInjector } from './platforms/reddit';
         }
       });
       groups.forEach((groupItems, id) => {
-        mediaCache.set(id, groupItems);
+        // Merge, never overwrite: a later partial dispatch (e.g. timeline
+        // cover only) must not wipe slides resolved earlier.
+        const prev = mediaCache.get(id);
+        mediaCache.set(id, prev && prev.length > 0 ? mergeMediaItems(prev, groupItems) : groupItems);
       });
     }
   });
