@@ -363,6 +363,21 @@ export function setupInstagramInjector(
           items = extractFromDom(container, shortcode, mediaCache);
         }
 
+        // Reels play via blob: URLs, so the DOM fallback legitimately finds
+        // nothing — but the fiber scan (3s interval) may simply not have run
+        // yet. Give it one targeted kick before declaring the media missing.
+        if ((!items || items.length === 0) && container.querySelector('video')) {
+          updateState('loading', 'Reading video...');
+          window.dispatchEvent(
+            new CustomEvent('__SOC_REQUEST_FIBER_MEDIA__', { detail: { shortcode } })
+          );
+          await new Promise((r) => setTimeout(r, 400));
+          if (shortcode) {
+            const retry = mediaCache.get(shortcode);
+            if (retry && retry.length > 0) items = retry;
+          }
+        }
+
         if (!items || items.length === 0) {
           updateState('error', 'Media not found');
           return;

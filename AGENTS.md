@@ -20,6 +20,7 @@ MV3 Chrome extension (TS + Vite + Vitest/happy-dom): HD media download buttons +
 - `src/background/` (service worker): `forceAll || explicit` bypasses the `autoDownloadAllCarousel` setting and downloads exactly the passed items.
 - `src/offscreen/` + `mp4box`: remuxes Reddit DASH video+audio. `src/content/ui/`: `button.ts`, `pickerModal.ts`, `videoControls.ts`.
 - Parsers (`src/parsers/`, `src/shared/`) are pure — put new extraction logic there with unit tests, not in injectors.
+- `parseInstagramMedia` ends with a bounded `deepScanMediaItems` fallback for unknown Reel/clips JSON shapes; Reels also get one targeted fiber retry (blob: video ⇒ DOM fallback is empty by design).
 
 ## Hard-won invariants (do not regress)
 

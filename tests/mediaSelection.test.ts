@@ -398,6 +398,51 @@ describe('Media Picker Modal (multi-item selection)', () => {
     expect(document.querySelector('.soc-picker-backdrop')).toBeNull();
   });
 
+  it('Instagram: blob-video reel recovers via targeted fiber retry instead of failing', async () => {
+    const container = document.createElement('article');
+    const link = document.createElement('a');
+    link.href = 'https://www.instagram.com/reel/REEL_RETRY/';
+    container.appendChild(link);
+
+    const shareBtn = document.createElement('button');
+    shareBtn.setAttribute('aria-label', 'Share Post');
+    container.appendChild(shareBtn);
+
+    // Reel video plays via blob: URL — DOM fallback legitimately finds nothing.
+    const video = document.createElement('video');
+    video.src = 'blob:https://www.instagram.com/abc-123';
+    container.appendChild(video);
+
+    document.body.appendChild(container);
+
+    const mediaCache = new Map<string, ExtractedMediaItem[]>();
+
+    // Simulate the MAIN-world fiber listener answering the retry request.
+    const recovered: ExtractedMediaItem[] = [
+      { id: 'REEL_RETRY', platform: 'instagram', type: 'video', author: 'creator', url: 'https://cdn.instagram.com/reel.mp4', ext: '.mp4' }
+    ];
+    window.addEventListener('__SOC_REQUEST_FIBER_MEDIA__', () => {
+      mediaCache.set('REEL_RETRY', recovered);
+    });
+
+    const requestDownloadMock = vi.fn().mockResolvedValue(true);
+    setupInstagramInjector(mediaCache, requestDownloadMock);
+
+    const dlBtn = container.querySelector('.soc-dl-btn') as HTMLButtonElement;
+    expect(dlBtn).not.toBeNull();
+
+    dlBtn.click();
+    await vi.waitFor(
+      () => {
+        expect(requestDownloadMock).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 10000 }
+    );
+
+    expect(requestDownloadMock).toHaveBeenCalledWith(recovered, { forceAll: true });
+    expect(document.querySelector('.soc-picker-backdrop')).toBeNull();
+  });
+
   it('Normalizes multi-media batch items with sequential index and total tokens', () => {
     const rawBatch: ExtractedMediaItem[] = [
       { id: 'batch_1', platform: 'instagram', type: 'image', url: 'https://cdn.example.com/1.jpg' },

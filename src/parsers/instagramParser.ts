@@ -179,7 +179,64 @@ export function parseInstagramMedia(raw: any): ExtractedMediaItem[] {
 
   // Direct single item
   const item = raw.media || raw.item || raw.data?.media || raw;
-  return parseSingleInstagramItem(item);
+  const direct = parseSingleInstagramItem(item);
+  if (direct.length > 0) return direct;
+
+  // Last resort: Reel surfaces (permalink viewer, user reels tab, discover)
+  // return shapes the explicit branches above don't know — deep-scan for
+  // media-like objects instead of giving up.
+  return deepScanMediaItems(raw);
+}
+
+/**
+ * Recursively collects media-like objects (video_versions /
+ * image_versions2 / carousel_media + a code/pk identity) from an unknown
+ * Instagram payload. Only used when standard parsing yields nothing, so
+ * cost and false-positive risk stay bounded. Results capped.
+ */
+export function deepScanMediaItems(raw: any, limit = 25): ExtractedMediaItem[] {
+  const found: ExtractedMediaItem[] = [];
+  const seen = new Set<string>();
+  const stack: Array<{ node: any; depth: number }> = [{ node: raw, depth: 0 }];
+
+  while (stack.length > 0 && found.length < limit) {
+    const { node, depth } = stack.pop()!;
+    if (!node || typeof node !== 'object' || depth > 12) continue;
+
+    if (Array.isArray(node)) {
+      for (let i = node.length - 1; i >= 0; i--) stack.push({ node: node[i], depth: depth + 1 });
+      continue;
+    }
+
+    const looksLikeMedia =
+      (Array.isArray((node as any).video_versions) ||
+        (node as any).image_versions2?.candidates ||
+        Array.isArray((node as any).carousel_media)) &&
+      ((node as any).code || (node as any).pk || (node as any).id);
+    if (looksLikeMedia) {
+      // Skip nested slides — the carousel parent parses them as one set.
+      const parsed = parseSingleInstagramItem(node);
+      for (const item of parsed) {
+        if (item.url && !seen.has(item.url)) {
+          seen.add(item.url);
+          found.push(item);
+          if (found.length >= limit) break;
+        }
+      }
+      continue;
+    }
+
+    // Descend, preferring media-bearing keys first.
+    const keys = Object.keys(node);
+    const priority = ['media', 'clip', 'reel', 'item', 'node', 'items', 'clips', 'edges'];
+    keys.sort((a, b) => priority.indexOf(b) - priority.indexOf(a));
+    for (const key of keys) {
+      const child = (node as any)[key];
+      if (child && typeof child === 'object') stack.push({ node: child, depth: depth + 1 });
+    }
+  }
+
+  return found;
 }
 
 function parseSingleInstagramItem(item: any): ExtractedMediaItem[] {
