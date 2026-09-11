@@ -73,6 +73,23 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
     clearHistory().then(() => sendResponse({ success: true }));
     return true;
   }
+
+  if (message.action === 'FETCH_TWITTER_SYNDICATION') {
+    (async () => {
+      try {
+        const resp = await fetch(message.url);
+        if (!resp.ok) {
+          sendResponse({ success: false, status: resp.status });
+          return;
+        }
+        const data = await resp.json();
+        sendResponse({ success: true, data });
+      } catch (err: any) {
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
 });
 }
 

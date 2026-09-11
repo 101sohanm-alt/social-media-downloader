@@ -52,36 +52,70 @@ export function toOrigTwimgUrl(url: string): { url: string; ext: string } {
 }
 
 /**
- * Recursively searches an object to locate a Tweet node if nested inside GraphQL responses.
+ * Recursively searches an object to collect all Tweet nodes in GraphQL, timeline, or feed responses.
  */
-function findTweetNode(obj: any): any {
-  if (!obj || typeof obj !== 'object') return null;
+function traverseTweetNodes(obj: any, visited: Set<any>): any[] {
+  if (!obj || typeof obj !== 'object') return [];
+  if (visited.has(obj)) return [];
+  visited.add(obj);
 
-  if (
-    (obj.legacy && obj.legacy.extended_entities) ||
-    (obj.extended_entities && obj.extended_entities.media) ||
+  const results: any[] = [];
+
+  const isTweetNode =
     obj.__typename === 'Tweet' ||
-    obj.__typename === 'TweetWithVisibilityResults'
-  ) {
-    return obj.tweet || obj;
+    obj.__typename === 'TweetWithVisibilityResults' ||
+    Boolean(obj.legacy && (obj.legacy.extended_entities || obj.legacy.id_str || obj.legacy.full_text)) ||
+    Boolean(obj.extended_entities && obj.extended_entities.media) ||
+    Boolean(obj.mediaDetails && Array.isArray(obj.mediaDetails)) ||
+    Boolean(obj.photos && Array.isArray(obj.photos)) ||
+    Boolean(obj.video && obj.video.variants);
+
+  if (isTweetNode) {
+    const tweet = obj.tweet || obj;
+    results.push(tweet);
   }
 
-  if (obj.tweetResult?.result) {
-    return findTweetNode(obj.tweetResult.result);
-  }
-
-  if (obj.data) {
-    return findTweetNode(obj.data);
-  }
-
-  for (const key of Object.keys(obj)) {
-    if (typeof obj[key] === 'object') {
-      const found = findTweetNode(obj[key]);
-      if (found) return found;
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      results.push(...traverseTweetNodes(item, visited));
+    }
+  } else {
+    for (const key of Object.keys(obj)) {
+      if (isTweetNode && (key === 'legacy' || key === 'tweet')) {
+        continue;
+      }
+      if (typeof obj[key] === 'object' && obj[key] !== null) {
+        results.push(...traverseTweetNodes(obj[key], visited));
+      }
     }
   }
 
-  return null;
+  return results;
+}
+
+export function collectAllTweetNodes(obj: any): any[] {
+  const nodes = traverseTweetNodes(obj, new Set());
+  const deduped: any[] = [];
+  const seenIds = new Set<string>();
+
+  for (const node of nodes) {
+    const id = node.rest_id || node.legacy?.id_str || node.id_str;
+    if (id) {
+      if (!seenIds.has(id)) {
+        seenIds.add(id);
+        deduped.push(node);
+      }
+    } else {
+      deduped.push(node);
+    }
+  }
+
+  return deduped;
+}
+
+function findTweetNode(obj: any): any {
+  const nodes = collectAllTweetNodes(obj);
+  return nodes.length > 0 ? nodes[0] : null;
 }
 
 /**
@@ -90,7 +124,16 @@ function findTweetNode(obj: any): any {
 export function parseTwitterTweet(rawTweet: any): PostMetadata | null {
   if (!rawTweet) return null;
 
-  const tweet = findTweetNode(rawTweet) || rawTweet;
+  const tweet =
+    rawTweet.tweet ||
+    (rawTweet.__typename === 'Tweet' ||
+    rawTweet.legacy ||
+    rawTweet.mediaDetails ||
+    rawTweet.photos ||
+    rawTweet.video
+      ? rawTweet
+      : findTweetNode(rawTweet) || rawTweet);
+
   const legacy = tweet.legacy || tweet;
 
   const userResults = tweet.core?.user_results?.result;
@@ -99,17 +142,71 @@ export function parseTwitterTweet(rawTweet: any): PostMetadata | null {
     userResults?.core?.screen_name ||
     legacy?.user?.screen_name ||
     legacy?.screen_name ||
+    tweet?.user?.screen_name ||
+    tweet?.screen_name ||
     rawTweet?.user?.screen_name ||
+    rawTweet?.screen_name ||
     'twitter_user';
 
-  const id = tweet.rest_id || legacy?.id_str || rawTweet?.id_str || String(Date.now());
-  const caption = legacy?.full_text || tweet.note_tweet?.note_tweet_results?.result?.text || '';
+  const id =
+    tweet.rest_id ||
+    legacy?.id_str ||
+    tweet.id_str ||
+    rawTweet?.id_str ||
+    String(Date.now());
 
-  const mediaList =
+  const caption =
+    legacy?.full_text ||
+    tweet.note_tweet?.note_tweet_results?.result?.text ||
+    tweet.text ||
+    legacy?.text ||
+    rawTweet?.text ||
+    '';
+
+  let mediaList =
     legacy?.extended_entities?.media ||
     tweet.extended_entities?.media ||
     rawTweet?.extended_entities?.media ||
-    [];
+    tweet.mediaDetails ||
+    rawTweet?.mediaDetails;
+
+  if (!Array.isArray(mediaList) || mediaList.length === 0) {
+    const syntheticMedia: any[] = [];
+    const photos = tweet.photos || rawTweet?.photos;
+    if (Array.isArray(photos)) {
+      photos.forEach((p: any, idx: number) => {
+        syntheticMedia.push({
+          id_str: `${id}_photo_${idx + 1}`,
+          type: 'photo',
+          media_url_https: p.url,
+          original_info: { width: p.width, height: p.height },
+        });
+      });
+    }
+
+    const video = tweet.video || rawTweet?.video;
+    if (video && Array.isArray(video.variants)) {
+      syntheticMedia.push({
+        id_str: `${id}_video_1`,
+        type: 'video',
+        media_url_https: photos?.[0]?.url || '',
+        video_info: {
+          variants: video.variants.map((v: any) => ({
+            bitrate: v.bitrate,
+            content_type:
+              v.type ||
+              v.content_type ||
+              (v.src?.includes('.m3u8') ? 'application/x-mpegURL' : 'video/mp4'),
+            url: v.src || v.url,
+          })),
+        },
+      });
+    }
+
+    if (syntheticMedia.length > 0) {
+      mediaList = syntheticMedia;
+    }
+  }
 
   if (!Array.isArray(mediaList) || mediaList.length === 0) {
     return null;
@@ -185,13 +282,19 @@ export function parseTwitterTweet(rawTweet: any): PostMetadata | null {
         qualities: qualities.length > 0 ? qualities : undefined
       });
     } else if (type === 'video' || type === 'animated_gif') {
-      const variants = item.video_info?.variants || [];
-      const mp4Variants = variants.filter(
-        (v: any) =>
-          v.content_type === 'video/mp4' &&
-          typeof v.url === 'string' &&
-          !v.url.includes('.m3u8')
-      );
+      const rawVariants = item.video_info?.variants || item.video?.variants || [];
+      const mp4Variants = rawVariants
+        .map((v: any) => ({
+          bitrate: v.bitrate,
+          content_type: v.content_type || v.type || 'video/mp4',
+          url: v.url || v.src,
+        }))
+        .filter(
+          (v: any) =>
+            (v.content_type === 'video/mp4' || (typeof v.url === 'string' && v.url.endsWith('.mp4'))) &&
+            typeof v.url === 'string' &&
+            !v.url.includes('.m3u8')
+        );
 
       if (mp4Variants.length > 0) {
         // Sort descending by bitrate
@@ -232,7 +335,7 @@ export function parseTwitterTweet(rawTweet: any): PostMetadata | null {
           height: item.original_info?.height,
           index: i + 1,
           total,
-          thumbnailUrl: item.media_url_https || item.media_url,
+          thumbnailUrl: thumbUrl,
           qualities
         });
       }
@@ -255,6 +358,34 @@ export function parseTwitterTweet(rawTweet: any): PostMetadata | null {
  * Pure parser that returns an array of MediaItem directly from Twitter data.
  */
 export function parseTwitterMedia(raw: any): MediaItem[] {
-  const post = parseTwitterTweet(raw);
-  return post ? post.media : [];
+  if (!raw) return [];
+
+  // 1. Handle direct syndication API response or single tweet with syndication/mediaDetails
+  if (raw.mediaDetails || raw.photos || raw.video?.variants) {
+    const post = parseTwitterTweet(raw);
+    if (post && post.media.length > 0) {
+      return post.media;
+    }
+  }
+
+  // 2. Collect all tweet nodes from GraphQL tree / timeline / feed responses
+  const tweetNodes = collectAllTweetNodes(raw);
+  const items: MediaItem[] = [];
+
+  for (const node of tweetNodes) {
+    const post = parseTwitterTweet(node);
+    if (post && post.media.length > 0) {
+      items.push(...post.media);
+    }
+  }
+
+  // 3. Fallback: parse raw directly if collectAllTweetNodes found nothing
+  if (items.length === 0) {
+    const directPost = parseTwitterTweet(raw);
+    if (directPost && directPost.media.length > 0) {
+      return directPost.media;
+    }
+  }
+
+  return items;
 }

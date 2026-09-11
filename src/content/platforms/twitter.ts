@@ -1,7 +1,62 @@
 import { ExtractedMediaItem } from '../../shared/types';
 import { createDownloadButton } from '../ui/button';
 import { openPickerModal } from '../ui/pickerModal';
-import { toOrigTwimgUrl } from '../../parsers/twitterParser';
+import { toOrigTwimgUrl, parseTwitterMedia } from '../../parsers/twitterParser';
+
+export function extractTweetId(tweetElement: HTMLElement): string {
+  // 1. Tweet's direct timestamp link (scoped to avoid nested quote tweets)
+  const timeLink = tweetElement.querySelector('time')?.closest('a[href*="/status/"]') as HTMLAnchorElement | null;
+  const timeMatch = (timeLink?.getAttribute('href') || timeLink?.href || '').match(/\/status\/(\d+)/);
+  if (timeMatch) return timeMatch[1];
+
+  // 2. Fallback to page permalink if on tweet page
+  if (typeof window !== 'undefined' && window.location?.pathname) {
+    const pageMatch = window.location.pathname.match(/\/status\/(\d+)/);
+    if (pageMatch) return pageMatch[1];
+  }
+
+  // 3. Fallback to any status link in element
+  const link = tweetElement.querySelector('a[href*="/status/"]') as HTMLAnchorElement | null;
+  const match = (link?.getAttribute('href') || link?.href || '').match(/\/status\/(\d+)/);
+  if (match) return match[1];
+
+  return '';
+}
+
+export function getSyndicationToken(tweetId: string): string {
+  return ((Number(tweetId) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, '');
+}
+
+export async function fetchTwitterPostJson(
+  tweetId: string,
+  mediaCache?: Map<string, ExtractedMediaItem[]>
+): Promise<ExtractedMediaItem[] | null> {
+  if (!tweetId || typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return null;
+  const token = getSyndicationToken(tweetId);
+  const url = `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&lang=en&token=${token}`;
+
+  try {
+    const res = await chrome.runtime.sendMessage({
+      action: 'FETCH_TWITTER_SYNDICATION',
+      tweetId,
+      url
+    });
+
+    if (res?.success && res.data) {
+      const items = parseTwitterMedia(res.data);
+      if (items && items.length > 0) {
+        if (mediaCache) {
+          mediaCache.set(tweetId, items);
+        }
+        return items;
+      }
+    }
+  } catch {
+    // Network or message error
+  }
+
+  return null;
+}
 
 export function setupTwitterInjector(
   mediaCache: Map<string, ExtractedMediaItem[]>,
@@ -13,10 +68,8 @@ export function setupTwitterInjector(
     const actionGroup = tweetElement.querySelector('div[role="group"]');
     if (!actionGroup) return;
 
-    // Extract tweet ID from permalink link
-    const link = tweetElement.querySelector('a[href*="/status/"]') as HTMLAnchorElement | null;
-    const match = link?.href.match(/\/status\/(\d+)/);
-    const tweetId = match ? match[1] : '';
+    // Extract tweet ID
+    const tweetId = extractTweetId(tweetElement);
 
     // Mark as processed
     tweetElement.dataset.socInjected = 'true';
@@ -30,7 +83,13 @@ export function setupTwitterInjector(
         // 1. Try from intercepted cache
         let items = tweetId ? mediaCache.get(tweetId) : undefined;
 
-        // 2. Fallback to DOM extraction if not captured in network cache
+        // 2. Fallback to Twitter Syndication API
+        if ((!items || items.length === 0) && tweetId) {
+          updateState('loading', 'Fetching media...');
+          items = (await fetchTwitterPostJson(tweetId, mediaCache)) || undefined;
+        }
+
+        // 3. Fallback to DOM extraction if not captured in network cache
         if (!items || items.length === 0) {
           items = extractFromTweetDom(tweetElement, tweetId);
         }

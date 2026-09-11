@@ -28,6 +28,11 @@ import { setupRedditInjector } from './platforms/reddit';
     }
   });
 
+  // Request any buffered media items intercepted before bridge listener was registered
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('__SOC_REQUEST_BUFFER__'));
+  }
+
   async function requestDownload(
     items: ExtractedMediaItem[],
     options?: { forceAll?: boolean }

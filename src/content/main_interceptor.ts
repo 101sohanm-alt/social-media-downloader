@@ -29,13 +29,34 @@ function isTargetUrl(url: string): boolean {
   return TARGET_DOMAINS.some((domain) => url.includes(domain));
 }
 
+const MAX_BUFFER_SIZE = 300;
+export const interceptedBuffer: ExtractedMediaItem[] = [];
+
 export function dispatchIntercepted(items: ExtractedMediaItem[]) {
   if (!items || items.length === 0) return;
+  for (const item of items) {
+    interceptedBuffer.push(item);
+  }
+  if (interceptedBuffer.length > MAX_BUFFER_SIZE) {
+    interceptedBuffer.splice(0, interceptedBuffer.length - MAX_BUFFER_SIZE);
+  }
   window.dispatchEvent(
     new CustomEvent('__SOC_MEDIA_INTERCEPTED__', {
       detail: { items }
     })
   );
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('__SOC_REQUEST_BUFFER__', () => {
+    if (interceptedBuffer.length > 0) {
+      window.dispatchEvent(
+        new CustomEvent('__SOC_MEDIA_INTERCEPTED__', {
+          detail: { items: [...interceptedBuffer] }
+        })
+      );
+    }
+  });
 }
 
   function handleJsonResponse(url: string, json: any) {
