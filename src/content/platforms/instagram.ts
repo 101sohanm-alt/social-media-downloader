@@ -3,7 +3,6 @@ import { parseInstagramMedia } from '../../parsers/instagramParser';
 import { mergeMediaItems } from '../../shared/mergeMedia';
 import { createDownloadButton } from '../ui/button';
 import { openPickerModal } from '../ui/pickerModal';
-import { attachVideoControls } from '../ui/videoControls';
 
 function getBestFromSrcset(srcset: string): string | null {
   if (!srcset) return null;
@@ -461,46 +460,8 @@ export function setupInstagramInjector(
 
 
 
-  function processInstagramVideos(root: HTMLElement = document.body) {
-    const videos = Array.from(root.querySelectorAll('video')) as HTMLVideoElement[];
-    videos.forEach((video) => {
-      if (video.dataset.socControlsInjected) return;
-
-      const mountPoint = getInstagramVideoMountPoint(video);
-      if (!mountPoint) return;
-
-      // Ensure mountPoint has relative positioning for the floating overlay
-      const computedPos = window.getComputedStyle(mountPoint).position;
-      if (computedPos === 'static') {
-        mountPoint.style.position = 'relative';
-      }
-
-      video.dataset.socControlsInjected = 'true';
-
-      // Find nearest post/reel shortcode to grab qualities from cache
-      const postEl = video.closest('article, div[role="dialog"]') as HTMLElement | null;
-      const link = postEl?.querySelector('a[href*="/p/"], a[href*="/reel/"]') as HTMLAnchorElement | null;
-      const match = link?.href.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
-      let shortcode = match ? match[2] : '';
-      if (!shortcode) {
-        const timeLink = postEl?.querySelector('time')?.closest('a') as HTMLAnchorElement | null;
-        const timeMatch = timeLink?.href.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
-        if (timeMatch) shortcode = timeMatch[2];
-      }
-      if (!shortcode) {
-        const pageMatch = window.location.pathname.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
-        if (pageMatch) shortcode = pageMatch[2];
-      }
-
-      let qualities = shortcode ? mediaCache.get(shortcode)?.[0]?.qualities : undefined;
-
-      attachVideoControls(video, mountPoint, { qualities });
-    });
-  }
-
   // Initial pass
   document.querySelectorAll('article, div[role="dialog"]').forEach((el) => processInstagramPost(el as HTMLElement));
-  processInstagramVideos(document.body);
 
   // Observer
   const observer = new MutationObserver((mutations) => {
@@ -513,56 +474,12 @@ export function setupInstagramInjector(
           } else {
             el.querySelectorAll?.('article, div[role="dialog"]').forEach((p) => processInstagramPost(p as HTMLElement));
           }
-          if (el.matches?.('video')) {
-            processInstagramVideos(el.parentElement || el);
-          } else if (el.querySelector?.('video')) {
-            processInstagramVideos(el);
-          }
         }
       });
     }
   });
 
   observer.observe(document.body, { childList: true, subtree: true });
-}
- 
-export function getInstagramVideoMountPoint(video: HTMLVideoElement): HTMLElement {
-  let mountPoint: HTMLElement;
-
-  // 1. Try Instagram React instancekey container
-  const instanceContainer = video.closest('div:has(>[data-instancekey]), div[data-instancekey]');
-  if (instanceContainer && instanceContainer.parentElement) {
-    mountPoint = instanceContainer.parentElement as HTMLElement;
-  } else {
-    // 2. Try climbing up to the element containing the video player frame
-    let curr = video.parentElement;
-    let found: HTMLElement | null = null;
-    while (curr && curr.parentElement && curr.parentElement !== document.body) {
-      const p = curr.parentElement;
-      const tag = p.tagName.toLowerCase();
-      const role = p.getAttribute('role');
-      if (tag === 'article' || role === 'dialog' || role === 'main' || tag === 'main') {
-        found = curr;
-        break;
-      }
-      curr = p;
-    }
-    mountPoint = found || video.parentElement || video;
-  }
-
-  // If candidate mount point is an <a> tag or contained inside one, climb up to anchor.parentElement
-  const anchor = mountPoint.closest('a');
-  if (anchor && anchor.parentElement) {
-    mountPoint = anchor.parentElement;
-  }
-
-  // Ensure mountPoint has relative positioning for the floating overlay
-  const computedPos = window.getComputedStyle(mountPoint).position;
-  if (!computedPos || computedPos === 'static') {
-    mountPoint.style.position = 'relative';
-  }
-
-  return mountPoint;
 }
 
 export function extractFromDom(

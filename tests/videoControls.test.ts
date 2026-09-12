@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { formatTime, attachVideoControls, getVideoDuration } from '../src/content/ui/videoControls';
-import { getInstagramVideoMountPoint } from '../src/content/platforms/instagram';
 import { MediaQuality } from '../src/shared/types';
 
 describe('Video Controls - Utility formatTime and getVideoDuration', () => {
@@ -312,41 +311,6 @@ describe('Video Controls Component (UI & Interactions)', () => {
     expect(stopSpy).toHaveBeenCalled();
     expect(stopImmSpy).toHaveBeenCalled();
     expect(clickSpy).not.toHaveBeenCalled();
-  });
-});
-
-describe('Instagram Mount Point Escape', () => {
-  it('climbs up out of any <a href="/reel/..."> tag to its parent and ensures relative positioning', () => {
-    const parentContainer = document.createElement('div');
-    const anchor = document.createElement('a');
-    anchor.href = 'https://www.instagram.com/reel/C12345/';
-    const videoWrapper = document.createElement('div');
-    const vid = document.createElement('video');
-
-    videoWrapper.appendChild(vid);
-    anchor.appendChild(videoWrapper);
-    parentContainer.appendChild(anchor);
-    document.body.appendChild(parentContainer);
-
-    const mount = getInstagramVideoMountPoint(vid);
-    expect(mount).toBe(parentContainer);
-    expect(mount.closest('a')).toBeNull();
-    expect(mount.style.position).toBe('relative');
-  });
-
-  it('climbs up out of anchor when candidate mount point is the anchor itself', () => {
-    const parentContainer = document.createElement('div');
-    const anchor = document.createElement('a');
-    anchor.href = '/reel/xyz';
-    const vid = document.createElement('video');
-    anchor.appendChild(vid);
-    parentContainer.appendChild(anchor);
-    document.body.appendChild(parentContainer);
-
-    const mount = getInstagramVideoMountPoint(vid);
-    expect(mount).toBe(parentContainer);
-    expect(mount.closest('a')).toBeNull();
-    expect(mount.style.position).toBe('relative');
   });
 });
 
