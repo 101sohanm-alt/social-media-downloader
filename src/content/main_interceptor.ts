@@ -13,8 +13,11 @@ const TARGET_DOMAINS = [
   'cdninstagram.com'
 ];
 
-function isTargetUrl(url: string): boolean {
+const STATIC_ASSET_REGEX = /\.(mp4|m3u8|ts|m4s|webm|jpg|jpeg|png|webp|gif|woff2?|css|svg|mp3|wav|ogg)(\?.*)?$/i;
+
+export function isTargetUrl(url: string): boolean {
   if (!url || typeof url !== 'string') return false;
+  if (STATIC_ASSET_REGEX.test(url)) return false;
   // Exclude analytics, ads, and third-party trackers
   if (
     url.includes('google.com') ||
@@ -110,11 +113,14 @@ if (typeof window !== 'undefined') {
       .then((response) => {
         try {
           if (response && response.ok) {
-            response
-              .clone()
-              .json()
-              .then((data) => handleJsonResponse(url, data))
-              .catch(() => {});
+            const contentType = response.headers?.get?.('content-type') || '';
+            if (contentType.includes('application/json')) {
+              response
+                .clone()
+                .json()
+                .then((data) => handleJsonResponse(url, data))
+                .catch(() => {});
+            }
           }
         } catch {
           // Ignore
@@ -309,14 +315,13 @@ if (typeof window !== 'undefined') {
     const targets = Array.from(document.querySelectorAll('article, div[role="dialog"], video'));
     for (const t of targets) {
       if ((t as any)._soc_fiber_scanned) continue;
+      (t as any)._soc_fiber_scanned = true;
       const items = extractMediaFromFiber(t);
       if (items && items.length > 0) {
-        (t as any)._soc_fiber_scanned = true;
         dispatchIntercepted(items);
       }
     }
   }
 
   setTimeout(scanVisibleFibers, 1000);
-  setInterval(scanVisibleFibers, 3000);
 }

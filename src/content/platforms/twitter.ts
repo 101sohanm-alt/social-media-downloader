@@ -175,19 +175,38 @@ export function setupTwitterInjector(
   document.querySelectorAll('article[data-testid="tweet"]').forEach((el) => processTweet(el as HTMLElement));
 
   // MutationObserver for virtualized feed
+  let debounceTimer: any;
+  const pendingNodes: HTMLElement[] = [];
+
   const observer = new MutationObserver((mutations) => {
+    let hasRelevantMutation = false;
     for (const m of mutations) {
       m.addedNodes.forEach((node) => {
         if (node.nodeType === Node.ELEMENT_NODE) {
           const el = node as HTMLElement;
-          if (el.matches?.('article[data-testid="tweet"]')) {
-            processTweet(el);
-          } else {
-            el.querySelectorAll?.('article[data-testid="tweet"]').forEach((t) => processTweet(t as HTMLElement));
+          if (el.matches?.('.soc-dl-btn, [data-soc-injected]') || el.closest?.('.soc-dl-btn')) {
+            return;
           }
+          hasRelevantMutation = true;
+          pendingNodes.push(el);
         }
       });
     }
+
+    if (!hasRelevantMutation) return;
+
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      const nodesToProcess = pendingNodes.splice(0, pendingNodes.length);
+      for (const el of nodesToProcess) {
+        if (!el.isConnected) continue;
+        if (el.matches?.('article[data-testid="tweet"]')) {
+          processTweet(el);
+        } else {
+          el.querySelectorAll?.('article[data-testid="tweet"]').forEach((t) => processTweet(t as HTMLElement));
+        }
+      }
+    }, 100);
   });
 
   observer.observe(document.body, { childList: true, subtree: true });

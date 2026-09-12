@@ -552,28 +552,6 @@ export function attachVideoControls(
   overlay.addEventListener('mousemove', onMouseMoveActivity);
   overlay.addEventListener('mouseenter', onMouseMoveActivity);
 
-  // Global Document Mouse Tracking: Ensures controls reappear even when Instagram transparent tap overlays intercept events
-  let lastDocMouseMove = 0;
-  const onDocumentMouseMove = (e: MouseEvent) => {
-    const now = Date.now();
-    if (now - lastDocMouseMove < 50) return;
-    lastDocMouseMove = now;
-
-    const rect = video.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-
-    if (
-      e.clientX >= rect.left - 20 &&
-      e.clientX <= rect.right + 20 &&
-      e.clientY >= rect.top - 20 &&
-      e.clientY <= rect.bottom + 20
-    ) {
-      showControls();
-    }
-  };
-
-  document.addEventListener('mousemove', onDocumentMouseMove, { passive: true });
-
   updateTimeline();
 
   const destroy = () => {
@@ -615,7 +593,6 @@ export function attachVideoControls(
     mountPoint.removeEventListener('mouseenter', onMouseMoveActivity);
     overlay.removeEventListener('mousemove', onMouseMoveActivity);
     overlay.removeEventListener('mouseenter', onMouseMoveActivity);
-    document.removeEventListener('mousemove', onDocumentMouseMove);
     window.removeEventListener('pointermove', onGlobalPointerMove);
     window.removeEventListener('pointerup', onGlobalPointerUp);
     overlay.remove();

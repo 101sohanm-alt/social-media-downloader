@@ -54,8 +54,9 @@ export function toOrigTwimgUrl(url: string): { url: string; ext: string } {
 /**
  * Recursively searches an object to collect all Tweet nodes in GraphQL, timeline, or feed responses.
  */
-function traverseTweetNodes(obj: any, visited: Set<any>): any[] {
+export function traverseTweetNodes(obj: any, visited: Set<any>, depth: number = 0): any[] {
   if (!obj || typeof obj !== 'object') return [];
+  if (depth > 15) return [];
   if (visited.has(obj)) return [];
   visited.add(obj);
 
@@ -77,7 +78,7 @@ function traverseTweetNodes(obj: any, visited: Set<any>): any[] {
 
   if (Array.isArray(obj)) {
     for (const item of obj) {
-      results.push(...traverseTweetNodes(item, visited));
+      results.push(...traverseTweetNodes(item, visited, depth + 1));
     }
   } else {
     for (const key of Object.keys(obj)) {
@@ -85,7 +86,7 @@ function traverseTweetNodes(obj: any, visited: Set<any>): any[] {
         continue;
       }
       if (typeof obj[key] === 'object' && obj[key] !== null) {
-        results.push(...traverseTweetNodes(obj[key], visited));
+        results.push(...traverseTweetNodes(obj[key], visited, depth + 1));
       }
     }
   }
@@ -113,26 +114,13 @@ export function collectAllTweetNodes(obj: any): any[] {
   return deduped;
 }
 
-function findTweetNode(obj: any): any {
-  const nodes = collectAllTweetNodes(obj);
-  return nodes.length > 0 ? nodes[0] : null;
-}
-
 /**
  * Parses a Twitter tweet payload into PostMetadata.
  */
 export function parseTwitterTweet(rawTweet: any): PostMetadata | null {
   if (!rawTweet) return null;
 
-  const tweet =
-    rawTweet.tweet ||
-    (rawTweet.__typename === 'Tweet' ||
-    rawTweet.legacy ||
-    rawTweet.mediaDetails ||
-    rawTweet.photos ||
-    rawTweet.video
-      ? rawTweet
-      : findTweetNode(rawTweet) || rawTweet);
+  const tweet = rawTweet.result?.tweet || rawTweet.result || rawTweet.tweet || rawTweet;
 
   const legacy = tweet.legacy || tweet;
 

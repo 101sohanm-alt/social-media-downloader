@@ -190,24 +190,46 @@ export function setupRedditInjector(
   processRedditVideoPlayers(document.body);
 
   // MutationObserver
+  let debounceTimer: any;
+  const pendingNodes: HTMLElement[] = [];
+
   const observer = new MutationObserver((mutations) => {
+    let hasRelevantMutation = false;
     for (const m of mutations) {
       m.addedNodes.forEach((node) => {
         if (node.nodeType === Node.ELEMENT_NODE) {
           const el = node as HTMLElement;
-          if (el.matches?.('shreddit-post, div.thing')) {
-            processRedditPost(el);
-          } else {
-            el.querySelectorAll?.('shreddit-post, div.thing').forEach((p) => processRedditPost(p as HTMLElement));
+          if (
+            el.matches?.('.soc-dl-btn, .soc-video-controls, [data-soc-injected]') ||
+            el.closest?.('.soc-dl-btn, .soc-video-controls')
+          ) {
+            return;
           }
-          if (el.matches?.('shreddit-player, video')) {
-            processRedditVideoPlayers(el.parentElement || el);
-          } else if (el.querySelector?.('shreddit-player, video')) {
-            processRedditVideoPlayers(el);
-          }
+          hasRelevantMutation = true;
+          pendingNodes.push(el);
         }
       });
     }
+
+    if (!hasRelevantMutation) return;
+
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      const nodesToProcess = pendingNodes.splice(0, pendingNodes.length);
+      for (const el of nodesToProcess) {
+        if (!el.isConnected) continue;
+        if (el.matches?.('shreddit-post, div.thing')) {
+          processRedditPost(el);
+        } else {
+          el.querySelectorAll?.('shreddit-post, div.thing').forEach((p) => processRedditPost(p as HTMLElement));
+        }
+        if (el.matches?.('shreddit-player, video')) {
+          processRedditVideoPlayers(el.parentElement || el);
+        } else if (el.querySelector?.('shreddit-player, video')) {
+          processRedditVideoPlayers(el);
+        }
+      }
+    }, 100);
   });
 
   observer.observe(document.body, { childList: true, subtree: true });

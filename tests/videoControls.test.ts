@@ -274,23 +274,8 @@ describe('Video Controls Component (UI & Interactions)', () => {
     vi.advanceTimersByTime(2600);
     expect(overlay.classList.contains('soc-hidden')).toBe(true);
 
-    // Document-level mouse move over video area brings it back
-    vi.spyOn(video, 'getBoundingClientRect').mockReturnValue({
-      left: 100,
-      top: 100,
-      right: 500,
-      bottom: 400,
-      width: 400,
-      height: 300,
-      x: 100,
-      y: 100,
-      toJSON: () => {}
-    });
-
-    const docMove = new MouseEvent('mousemove', { bubbles: true, cancelable: true });
-    Object.defineProperty(docMove, 'clientX', { value: 200 });
-    Object.defineProperty(docMove, 'clientY', { value: 200 });
-    document.dispatchEvent(docMove);
+    // Mouse move on overlay brings controls back
+    overlay.dispatchEvent(new MouseEvent('mousemove'));
 
     expect(overlay.classList.contains('soc-hidden')).toBe(false);
   });

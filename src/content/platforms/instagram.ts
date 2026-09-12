@@ -275,8 +275,19 @@ export function setupInstagramInjector(
   function processInstagramPost(container: HTMLElement) {
     if (container.dataset.socInjected && container.querySelector('.soc-dl-btn.soc-instagram')) return;
 
+    const retryCount = parseInt(container.dataset.socRetryCount || '0', 10);
+    if (container.dataset.socPending === 'true' && retryCount >= 3) {
+      return;
+    }
+
     const shareTarget = findInstagramShareButton(container);
-    if (!shareTarget) return;
+    if (!shareTarget) {
+      container.dataset.socPending = 'true';
+      container.dataset.socRetryCount = String(retryCount + 1);
+      return;
+    }
+    delete container.dataset.socPending;
+    delete container.dataset.socRetryCount;
 
     // If shareTarget is wrapped in a single-child wrapper (e.g. <span><button></span>), target wrapper
     let insertPoint = shareTarget;
@@ -464,19 +475,41 @@ export function setupInstagramInjector(
   document.querySelectorAll('article, div[role="dialog"]').forEach((el) => processInstagramPost(el as HTMLElement));
 
   // Observer
+  let debounceTimer: any;
+  const pendingNodes: HTMLElement[] = [];
+
   const observer = new MutationObserver((mutations) => {
+    let hasRelevantMutation = false;
     for (const m of mutations) {
       m.addedNodes.forEach((node) => {
         if (node.nodeType === Node.ELEMENT_NODE) {
           const el = node as HTMLElement;
-          if (el.matches?.('article, div[role="dialog"]')) {
-            processInstagramPost(el);
-          } else {
-            el.querySelectorAll?.('article, div[role="dialog"]').forEach((p) => processInstagramPost(p as HTMLElement));
+          if (
+            el.matches?.('.soc-dl-btn, .soc-picker, [data-soc-injected]') ||
+            el.closest?.('.soc-dl-btn, .soc-picker')
+          ) {
+            return;
           }
+          hasRelevantMutation = true;
+          pendingNodes.push(el);
         }
       });
     }
+
+    if (!hasRelevantMutation) return;
+
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      const nodesToProcess = pendingNodes.splice(0, pendingNodes.length);
+      for (const el of nodesToProcess) {
+        if (!el.isConnected) continue;
+        if (el.matches?.('article, div[role="dialog"]')) {
+          processInstagramPost(el);
+        } else {
+          el.querySelectorAll?.('article, div[role="dialog"]').forEach((p) => processInstagramPost(p as HTMLElement));
+        }
+      }
+    }, 100);
   });
 
   observer.observe(document.body, { childList: true, subtree: true });
