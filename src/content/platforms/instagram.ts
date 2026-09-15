@@ -4,6 +4,8 @@ import { mergeMediaItems } from '../../shared/mergeMedia';
 import { createDownloadButton } from '../ui/button';
 import { openPickerModal } from '../ui/pickerModal';
 
+export const INSTAGRAM_SHORTCODE_REGEX = /\/(p|reel|reels)\/([A-Za-z0-9_-]+)/;
+
 function getBestFromSrcset(srcset: string): string | null {
   if (!srcset) return null;
   const entries = srcset.split(',').map((part) => {
@@ -273,21 +275,30 @@ export function setupInstagramInjector(
   }
 
   function processInstagramPost(container: HTMLElement) {
-    if (container.dataset.socInjected && container.querySelector('.soc-dl-btn.soc-instagram')) return;
+    if (
+      container.tagName !== 'ARTICLE' &&
+      container.getAttribute('role') !== 'dialog' &&
+      container.closest('article, div[role="dialog"]')
+    ) {
+      return;
+    }
 
-    const retryCount = parseInt(container.dataset.socRetryCount || '0', 10);
-    if (container.dataset.socPending === 'true' && retryCount >= 3) {
+    if (
+      (container.dataset.socInjected && container.querySelector('.soc-dl-btn.soc-instagram')) ||
+      container.querySelector('.soc-dl-btn.soc-instagram')
+    ) {
       return;
     }
 
     const shareTarget = findInstagramShareButton(container);
     if (!shareTarget) {
-      container.dataset.socPending = 'true';
-      container.dataset.socRetryCount = String(retryCount + 1);
       return;
     }
-    delete container.dataset.socPending;
-    delete container.dataset.socRetryCount;
+
+    if (shareTarget.parentElement?.querySelector('.soc-dl-btn.soc-instagram')) {
+      container.dataset.socInjected = 'true';
+      return;
+    }
 
     // If shareTarget is wrapped in a single-child wrapper (e.g. <span><button></span>), target wrapper
     let insertPoint = shareTarget;
@@ -300,17 +311,22 @@ export function setupInstagramInjector(
       insertPoint = insertPoint.parentElement;
     }
 
+    if (insertPoint.parentElement?.querySelector('.soc-dl-btn.soc-instagram')) {
+      container.dataset.socInjected = 'true';
+      return;
+    }
+
     // Extract shortcode / ID
-    const link = container.querySelector('a[href*="/p/"], a[href*="/reel/"]') as HTMLAnchorElement | null;
-    const match = link?.href.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+    const link = container.querySelector('a[href*="/p/"], a[href*="/reel/"], a[href*="/reels/"]') as HTMLAnchorElement | null;
+    const match = link?.href.match(INSTAGRAM_SHORTCODE_REGEX);
     let shortcode = match ? match[2] : '';
     if (!shortcode) {
       const timeLink = container.querySelector('time')?.closest('a') as HTMLAnchorElement | null;
-      const timeMatch = timeLink?.href.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+      const timeMatch = timeLink?.href.match(INSTAGRAM_SHORTCODE_REGEX);
       if (timeMatch) shortcode = timeMatch[2];
     }
     if (!shortcode) {
-      const pageMatch = window.location.pathname.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+      const pageMatch = window.location.pathname.match(INSTAGRAM_SHORTCODE_REGEX);
       if (pageMatch) shortcode = pageMatch[2];
     }
 
@@ -471,8 +487,11 @@ export function setupInstagramInjector(
 
 
 
+  const CONTAINER_SELECTOR =
+    'article, div[role="dialog"], main[role="main"] section, div[role="presentation"]';
+
   // Initial pass
-  document.querySelectorAll('article, div[role="dialog"]').forEach((el) => processInstagramPost(el as HTMLElement));
+  document.querySelectorAll(CONTAINER_SELECTOR).forEach((el) => processInstagramPost(el as HTMLElement));
 
   // Observer
   let debounceTimer: any;
@@ -503,10 +522,14 @@ export function setupInstagramInjector(
       const nodesToProcess = pendingNodes.splice(0, pendingNodes.length);
       for (const el of nodesToProcess) {
         if (!el.isConnected) continue;
-        if (el.matches?.('article, div[role="dialog"]')) {
+        const parentContainer = el.closest?.(CONTAINER_SELECTOR) as HTMLElement | null;
+        if (parentContainer) {
+          processInstagramPost(parentContainer);
+        }
+        if (el.matches?.(CONTAINER_SELECTOR)) {
           processInstagramPost(el);
         } else {
-          el.querySelectorAll?.('article, div[role="dialog"]').forEach((p) => processInstagramPost(p as HTMLElement));
+          el.querySelectorAll?.(CONTAINER_SELECTOR).forEach((p) => processInstagramPost(p as HTMLElement));
         }
       }
     }, 100);

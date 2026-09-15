@@ -28,8 +28,14 @@ export function isTargetUrl(url: string): boolean {
   ) {
     return false;
   }
+  if (url.includes('/graphql/query') || url.includes('/api/v1/')) return true;
   if (url.startsWith('/') || url.startsWith('./')) return true;
   return TARGET_DOMAINS.some((domain) => url.includes(domain));
+}
+
+export function stripForLoopPrefix(text: string): string {
+  if (!text || typeof text !== 'string') return text;
+  return text.replace(/^\s*for\s*\(\s*;\s*;\s*\)\s*;\s*/, '');
 }
 
 const MAX_BUFFER_SIZE = 300;
@@ -114,11 +120,22 @@ if (typeof window !== 'undefined') {
         try {
           if (response && response.ok) {
             const contentType = response.headers?.get?.('content-type') || '';
-            if (contentType.includes('application/json')) {
+            const isJsonOrApi =
+              contentType.includes('application/json') ||
+              contentType.includes('application/x-javascript') ||
+              contentType.includes('text/javascript') ||
+              url.includes('/graphql/query') ||
+              url.includes('/api/v1/');
+
+            if (isJsonOrApi) {
               response
                 .clone()
-                .json()
-                .then((data) => handleJsonResponse(url, data))
+                .text()
+                .then((rawText) => {
+                  const cleaned = stripForLoopPrefix(rawText);
+                  const data = JSON.parse(cleaned);
+                  handleJsonResponse(url, data);
+                })
                 .catch(() => {});
             }
           }
@@ -151,9 +168,25 @@ if (typeof window !== 'undefined') {
         try {
           const url = (this as any)._soc_url;
           const contentType = this.getResponseHeader('content-type') || '';
-          if (contentType.includes('application/json') || this.responseType === 'json') {
-            const data = this.responseType === 'json' ? this.response : JSON.parse(this.responseText);
-            handleJsonResponse(url, data);
+          const isJsonOrApi =
+            contentType.includes('application/json') ||
+            contentType.includes('application/x-javascript') ||
+            contentType.includes('text/javascript') ||
+            url.includes('/graphql/query') ||
+            url.includes('/api/v1/') ||
+            this.responseType === 'json';
+
+          if (isJsonOrApi) {
+            let data: any;
+            if (this.responseType === 'json' && typeof this.response === 'object' && this.response !== null) {
+              data = this.response;
+            } else if (typeof this.responseText === 'string') {
+              const cleaned = stripForLoopPrefix(this.responseText);
+              data = JSON.parse(cleaned);
+            }
+            if (data) {
+              handleJsonResponse(url, data);
+            }
           }
         } catch {
           // Ignore
@@ -254,49 +287,91 @@ export function extractMediaFromFiber(
 export function matchesShortcode(el: Element, shortcode: string): boolean {
   if (!shortcode) return false;
   // 1. Direct or descendant links
-  const links = Array.from(el.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]')) as HTMLAnchorElement[];
+  const links = Array.from(
+    el.querySelectorAll('a[href*="/p/"], a[href*="/reel/"], a[href*="/reels/"]')
+  ) as HTMLAnchorElement[];
   for (const l of links) {
-    if (l.href.includes(`/p/${shortcode}`) || l.href.includes(`/reel/${shortcode}`)) {
+    if (
+      l.href.includes(`/p/${shortcode}`) ||
+      l.href.includes(`/reel/${shortcode}`) ||
+      l.href.includes(`/reels/${shortcode}`)
+    ) {
       return true;
     }
   }
-  if (links.some((l) => /\/(p|reel)\/([A-Za-z0-9_-]+)/.test(l.href))) {
+  if (links.some((l) => /\/(p|reel|reels)\/([A-Za-z0-9_-]+)/.test(l.href))) {
     return false;
   }
 
   // 2. Parent post container
-  const postContainer = el.closest('article, div[role="dialog"]');
+  const postContainer = el.closest('article, div[role="dialog"], section, main');
   if (postContainer && postContainer !== el) {
-    const parentLinks = Array.from(postContainer.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]')) as HTMLAnchorElement[];
+    const parentLinks = Array.from(
+      postContainer.querySelectorAll('a[href*="/p/"], a[href*="/reel/"], a[href*="/reels/"]')
+    ) as HTMLAnchorElement[];
     for (const l of parentLinks) {
-      if (l.href.includes(`/p/${shortcode}`) || l.href.includes(`/reel/${shortcode}`)) {
+      if (
+        l.href.includes(`/p/${shortcode}`) ||
+        l.href.includes(`/reel/${shortcode}`) ||
+        l.href.includes(`/reels/${shortcode}`)
+      ) {
         return true;
       }
     }
-    if (parentLinks.some((l) => /\/(p|reel)\/([A-Za-z0-9_-]+)/.test(l.href))) {
+    if (parentLinks.some((l) => /\/(p|reel|reels)\/([A-Za-z0-9_-]+)/.test(l.href))) {
       return false;
     }
   }
 
   // 3. Fallback: If on post/reel page and el is within the dedicated post container with no competing links
-  const urlMatch = window.location.pathname.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+  const urlMatch = window.location.pathname.match(/\/(p|reel|reels)\/([A-Za-z0-9_-]+)/);
   if (urlMatch && urlMatch[2] === shortcode) {
-    if (el.matches?.('article, div[role="dialog"]') || el.closest?.('article, div[role="dialog"]')) {
+    if (
+      el.matches?.('article, div[role="dialog"], section, main') ||
+      el.closest?.('article, div[role="dialog"], section, main')
+    ) {
       return true;
     }
   }
   return false;
 }
 
+function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): (...args: Parameters<T>) => void {
+  let timer: any;
+  return (...args: Parameters<T>) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delay);
+  };
+}
+
 // Listen to fiber media requests from isolated bridge
 if (typeof window !== 'undefined') {
+  // Scan fibers on visible articles, sections, and video containers
+  function scanVisibleFibers() {
+    if (!window.location?.hostname?.includes('instagram.com')) return;
+    const targets = Array.from(
+      document.querySelectorAll(
+        'article, div[role="dialog"], video, main[role="main"] section, div[role="presentation"]'
+      )
+    );
+    for (const t of targets) {
+      if ((t as any)._soc_fiber_scanned) continue;
+      const items = extractMediaFromFiber(t);
+      if (items && items.length > 0) {
+        (t as any)._soc_fiber_scanned = true;
+        dispatchIntercepted(items);
+      }
+    }
+  }
+
   window.addEventListener('__SOC_REQUEST_FIBER_MEDIA__', (event: any) => {
-    const pageShortcode = window.location.pathname.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/)?.[2] || '';
+    scanVisibleFibers();
+    const pageShortcode = window.location.pathname.match(/\/(p|reel|reels)\/([A-Za-z0-9_-]+)/)?.[2] || '';
     const shortcode = event.detail?.shortcode || pageShortcode;
 
     const targets: Element[] = [];
     document.querySelectorAll('video').forEach((v) => targets.push(v));
-    document.querySelectorAll('article, div[role="dialog"]').forEach((a) => targets.push(a));
+    document.querySelectorAll('article, div[role="dialog"], section, main').forEach((a) => targets.push(a));
 
     for (const target of targets) {
       if (matchesShortcode(target, shortcode)) {
@@ -309,19 +384,6 @@ if (typeof window !== 'undefined') {
     }
   });
 
-  // Scan fibers on visible articles and video containers
-  function scanVisibleFibers() {
-    if (!window.location.hostname.includes('instagram.com')) return;
-    const targets = Array.from(document.querySelectorAll('article, div[role="dialog"], video'));
-    for (const t of targets) {
-      if ((t as any)._soc_fiber_scanned) continue;
-      (t as any)._soc_fiber_scanned = true;
-      const items = extractMediaFromFiber(t);
-      if (items && items.length > 0) {
-        dispatchIntercepted(items);
-      }
-    }
-  }
-
+  window.addEventListener('scroll', debounce(scanVisibleFibers, 300), { passive: true });
   setTimeout(scanVisibleFibers, 1000);
 }
