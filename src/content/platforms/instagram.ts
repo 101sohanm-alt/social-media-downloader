@@ -379,8 +379,12 @@ export function setupInstagramInjector(
           updateState('loading', 'Loading all slides...');
           const fetchedItems = await fetchInstagramPostJson(shortcode);
           if (fetchedItems && fetchedItems.length > 0) {
-            items = fetchedItems;
-            mediaCache.set(shortcode, items);
+            // Merge, never overwrite (AGENTS.md invariant): an API refetch is
+            // best-effort and can return FEWER items than the cache already
+            // holds. Overwriting here silently dropped resolved slides.
+            const merged = mergeMediaItems(items || [], fetchedItems);
+            items = merged;
+            mediaCache.set(shortcode, merged);
           }
         }
 
