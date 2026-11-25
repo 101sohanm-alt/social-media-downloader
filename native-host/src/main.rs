@@ -433,25 +433,52 @@ fn fetch_to_file(url: &str, dest: &Path) -> Result<u64, String> {
 /// Verify a produced media file actually carries both streams.
 ///
 /// A mux that exits 0 can still emit a file with no audio track — the failure
-/// mode the previous JS/mp4box implementation shipped. Counting streams with
-/// ffprobe is the only honest success check.
+/// mode the previous JS/mp4box implementation shipped, where a ~596-byte shell
+/// was recorded as "completed". Counting streams is the only honest success
+/// check.
+///
+/// Prefers `ffprobe`, but falls back to parsing `ffmpeg -i` because Homebrew and
+/// the evermeet static builds do not always install the pair together (this
+/// machine has ffmpeg and no ffprobe), and a missing probe must not be mistaken
+/// for a missing stream.
 fn has_video_and_audio(path: &Path) -> Result<bool, String> {
-    // ffprobe ships alongside ffmpeg, but resolve it the same way rather than
-    // assuming the Homebrew prefix.
-    let ffprobe = find_tool("ffprobe").ok_or("ffprobe is not installed")?;
-    let output = ProcCommand::new(&ffprobe)
-        .args(["-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0"])
-        .arg(path)
-        .output()
-        .map_err(|e| format!("could not run ffprobe: {e}"))?;
+    if let Some(ffprobe) = find_tool("ffprobe") {
+        let output = ProcCommand::new(&ffprobe)
+            .args(["-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0"])
+            .arg(path)
+            .output()
+            .map_err(|e| format!("could not run ffprobe: {e}"))?;
 
-    if !output.status.success() {
-        return Ok(false);
+        if output.status.success() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            let has_video = text.lines().any(|l| l.trim() == "video");
+            let has_audio = text.lines().any(|l| l.trim() == "audio");
+            return Ok(has_video && has_audio);
+        }
+        // ffprobe present but unhappy: fall through to the ffmpeg parse rather
+        // than declaring the file bad on the probe's say-so.
     }
 
-    let text = String::from_utf8_lossy(&output.stdout);
-    let has_video = text.lines().any(|l| l.trim() == "video");
-    let has_audio = text.lines().any(|l| l.trim() == "audio");
+    let ffmpeg = find_tool("ffmpeg").ok_or("ffmpeg is not installed")?;
+    let output = ProcCommand::new(&ffmpeg)
+        .args(["-hide_banner", "-i"])
+        .arg(path)
+        .output()
+        .map_err(|e| format!("could not run ffmpeg: {e}"))?;
+
+    // ffmpeg prints the stream table to stderr and then exits non-zero because no
+    // output file was named; that is the expected, successful inspection path.
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // "Stream #0:1[...]: Audio: aac ..." — the colon after the stream type is
+    // what distinguishes a real stream line from the word appearing in metadata.
+    let has_video = text.contains(": Video:");
+    let has_audio = text.contains(": Audio:");
+
     Ok(has_video && has_audio)
 }
 
@@ -830,5 +857,81 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["ok"], false);
         assert!(v["error"].as_str().unwrap().contains("filename"));
+    }
+
+    /// The stream check must reject a video-only file and accept a real mux.
+    ///
+    /// This is the exact check that would have caught the original mp4box bug,
+    /// where a file with no audio was recorded as completed. Skipped when ffmpeg
+    /// is absent so the suite still runs on a bare machine.
+    #[test]
+    fn stream_detection_distinguishes_video_only_from_muxed() {
+        let Some(ffmpeg) = find_tool("ffmpeg") else {
+            eprintln!("skipping: ffmpeg not installed");
+            return;
+        };
+
+        let dir = std::env::temp_dir().join(format!("omni-streams-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let video = dir.join("v.mp4");
+        let audio = dir.join("a.m4a");
+        let merged = dir.join("m.mp4");
+
+        // 1 second of synthetic media — small and fast, no network.
+        let made_video = ProcCommand::new(&ffmpeg)
+            .args(["-y", "-loglevel", "error", "-f", "lavfi", "-i"])
+            .arg("testsrc=duration=1:size=160x120:rate=10")
+            .args(["-c:v", "libx264", "-pix_fmt", "yuv420p"])
+            .arg(&video)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+
+        let made_audio = ProcCommand::new(&ffmpeg)
+            .args(["-y", "-loglevel", "error", "-f", "lavfi", "-i"])
+            .arg("sine=frequency=440:duration=1")
+            .args(["-c:a", "aac"])
+            .arg(&audio)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+
+        if !made_video || !made_audio {
+            // No libx264 / aac encoder available: not a failure of our logic.
+            eprintln!("skipping: ffmpeg could not generate test media");
+            let _ = fs::remove_dir_all(&dir);
+            return;
+        }
+
+        // A video-only file must NOT be reported as having audio.
+        assert_eq!(
+            has_video_and_audio(&video).unwrap(),
+            false,
+            "video-only file was incorrectly accepted as a complete mux"
+        );
+
+        // After a real mux, both streams must be present.
+        let muxed = ProcCommand::new(&ffmpeg)
+            .args(["-y", "-loglevel", "error", "-i"])
+            .arg(&video)
+            .arg("-i")
+            .arg(&audio)
+            .args(["-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-shortest"])
+            .arg(&merged)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+
+        if muxed {
+            assert_eq!(
+                has_video_and_audio(&merged).unwrap(),
+                true,
+                "a correctly muxed file was rejected"
+            );
+        }
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }
