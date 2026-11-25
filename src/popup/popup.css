@@ -758,6 +758,15 @@ input[type="text"]:focus {
   border: 1px solid rgba(244, 63, 94, 0.2);
 }
 
+/* The outcome is genuinely unknown, not broken: the native host does the
+   transfer in its own process and may finish after the extension stops waiting.
+   Amber says "unconfirmed" without claiming the file is missing. */
+.status-pending {
+  background-color: rgba(251, 191, 36, 0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.2);
+}
+
 .fetch-status.success {
   color: #4ade80;
 }

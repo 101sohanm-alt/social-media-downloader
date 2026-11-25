@@ -37,9 +37,9 @@
   - **Native messaging host (Rust)**: Owns the folder picker, the file transfer, and DASH remuxing. See below.
 - **Tooling**:
   - **TypeScript 5** for end-to-end type safety.
-  - **Rust 2021** for the native host — 942 lines, two dependencies (`serde`, `serde_json`), 420 KB release binary.
+  - **Rust 2021** for the native host — 942 lines including tests, two dependencies (`serde`, `serde_json`), ~430 KB release binary (`cargo build --release` reports the exact size).
   - **Vite 5** custom multi-target bundling engine (`scripts/build.js`).
-  - **Vitest & Happy-DOM** — 139 tests across 17 files; **`cargo test`** — 21 unit tests; `native-host/test-protocol.mjs` — 13 wire-protocol tests against the real binary.
+  - **Vitest & Happy-DOM** — 142 tests across 18 files; **`cargo test`** — 21 unit tests; `native-host/test-protocol.mjs` — 13 wire-protocol tests against the real binary.
 
 ---
 
@@ -146,7 +146,7 @@ Chrome completely and reopen it — Chrome caches native-host manifests at start
 The codebase includes unit and integration tests covering parser extraction, video control logic, filename templating, DASH remuxing, and media selection state:
 
 ```bash
-# Run all extension tests (139 across 17 files)
+# Run all extension tests (142 across 18 files)
 npm test
 
 # Run a single file

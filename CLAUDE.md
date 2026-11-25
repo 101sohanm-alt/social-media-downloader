@@ -28,7 +28,7 @@ half-finished migration — it is the boundary of what each runtime can reach:
 ## Commands
 
 ```bash
-npm test                                  # 139 tests / 17 files
+npm test                                  # 142 tests / 18 files
 npx vitest run tests/<name>.test.ts       # one file
 npm run build                             # tsc --noEmit && node scripts/build.js
 
@@ -65,7 +65,7 @@ loads — a known, documented limitation, not an oversight.
 
 `src/parsers/` and `src/shared/` are pure functions with **zero DOM references**
 (verified). That is deliberate: it makes them the easiest unit-test seam, and it
-is why the 139 tests can cover extraction at all. New extraction logic belongs
+is why the 142 tests can cover extraction at all. New extraction logic belongs
 there, never in an injector.
 
 ### Download path and its fallback

@@ -4,7 +4,7 @@ MV3 Chrome extension (TS + Vite + Vitest/happy-dom): HD media download buttons +
 
 ## Commands
 
-- `npm test` — full suite (`vitest run`, 139 tests / 17 files); single file: `npx vitest run tests/<name>.test.ts`; watch: `npm run test:watch`
+- `npm test` — full suite (`vitest run`, 142 tests / 18 files); single file: `npx vitest run tests/<name>.test.ts`; watch: `npm run test:watch`
 - `npm run build` — **only** supported build: `tsc --noEmit && node scripts/build.js`. Do NOT run `vite build` directly (`vite.config.ts` is a stale legacy path; `build.js` calls vite with `configFile: false`).
 - `cd native-host && cargo test --release` — 21 Rust unit tests
 - `node native-host/test-protocol.mjs` — 13 wire-protocol tests against the real binary over stdin/stdout. Run this after ANY change to the framing or the reply shape; unit tests cannot catch an endianness or length-width bug.
