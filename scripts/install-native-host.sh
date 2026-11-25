@@ -114,16 +114,32 @@ JSON
   say "Allowed origin: chrome-extension://${EXT_ID}/"
 
   # 5. Smoke test the wire protocol -----------------------------------------
-  # The protocol is a 4-byte little-endian length prefix followed by JSON. If
-  # this prints a JSON object, the binary is executable and speaks the protocol.
+  # The protocol is a 4-byte little-endian length prefix followed by JSON, so the
+  # prefix MUST be computed from the payload. Hardcoding it is how this check
+  # first shipped: it said 22 bytes for a 14-byte message, the host waited for
+  # the rest, and a perfectly good binary was reported as broken.
+  #
+  # printf emits the prefix via %b, because %s does not interpret escapes: the
+  # escape sequence has to be built as text first, then expanded as bytes.
   echo "Smoke-testing the host…"
+  local payload='{"cmd":"ping"}'
+  local len=${#payload}
+  local esc
+  esc="$(printf '\\%03o' "$len")"
+
   local reply
-  reply="$(printf '\026\000\000\000{"cmd":"ping"}' | "$BIN" 2>/dev/null | tail -c +5)"
+  reply="$(printf '%b%s' "${esc}\\000\\000\\000" "$payload" | "$BIN" 2>/dev/null | tail -c +5)"
+
   if [[ "$reply" == *'"ok":true'* ]]; then
     ok "Host responds: ${reply}"
   else
     err "Host did not answer the ping correctly: ${reply:-<no output>}"
-    say "That is usually a launch or permission problem with ${BIN}."
+    say ""
+    say "Diagnose with the binary directly (expect a JSON object):"
+    say "  printf '%b%s' '${esc}\\000\\000\\000' '${payload}' | \"${BIN}\" | tail -c +5"
+    say ""
+    say "Common causes: the binary is not executable (chmod +x), or macOS"
+    say "blocked it (xattr -d com.apple.quarantine \"${BIN}\")."
     exit 1
   fi
 
