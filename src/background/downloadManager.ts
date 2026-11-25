@@ -184,6 +184,26 @@ async function tryNativeDownload(
       resetHostAvailability();
       return { kind: 'unusable' };
     }
+
+    // A timeout is NOT a failure. Our deadline elapsed, but the host is a
+    // separate process that keeps downloading — it may well finish and write the
+    // file after we stopped listening. Recording `failed` would be a phantom
+    // red row for a file that exists, so record `pending` instead: the download
+    // is unconfirmed, not broken.
+    if (result.code === 'timeout') {
+      return {
+        kind: 'record',
+        record: {
+          id: `pending:${filename}`,
+          platform: item.platform,
+          author: item.author || 'unknown',
+          filename,
+          timestamp: Date.now(),
+          status: 'pending'
+        }
+      };
+    }
+
     return { kind: 'failed', message: result.message };
   }
 

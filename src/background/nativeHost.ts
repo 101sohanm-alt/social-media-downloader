@@ -18,17 +18,22 @@ import { NATIVE_HOST_NAME } from '../shared/constants';
 export const CONTROL_TIMEOUT_MS = 30_000;
 
 /**
- * Transfers must finish inside Chrome's limit, not the other way round.
+ * Transfers get a generous budget because native messaging is EXEMPT from the
+ * service worker's five-minute cap.
  *
- * The docs are explicit: a service worker is terminated "when a single request,
- * such as an event or API call, takes longer than 5 minutes to process"
- * (developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle).
- * A 15-minute transfer budget therefore guaranteed silent death on any large
- * file. 4 minutes leaves headroom for the response to be delivered before the
- * worker is torn down, and the host's own curl deadline is set below this so the
- * host always reports its failure rather than being killed mid-flight.
+ * The generic rule ("terminates if a single request takes longer than 5 minutes")
+ * does not apply here. Chrome states that "some APIs like native messaging
+ * provide a strong keep-alive which cancel both of these timers"
+ * (developer.chrome.com/blog/longer-esw-lifetimes), and the browser source sets
+ * the service-worker request timeout to `TimeDelta::Max()` when a native channel
+ * is open. Measured against Chrome 105+; verified on 140+.
+ *
+ * So the host, not Chrome, decides when a transfer is over. We still impose a
+ * deadline of our own so a wedged host cannot pin the worker forever — but that
+ * deadline is OURS, which is why expiry is reported as `timeout` rather than
+ * `failed`: the host may well finish after we stop listening.
  */
-export const TRANSFER_TIMEOUT_MS = 4 * 60_000;
+export const TRANSFER_TIMEOUT_MS = 15 * 60_000;
 
 /** Cache the ping so a 10-slide carousel does not spawn 10 host processes. */
 export const AVAILABILITY_TTL_MS = 60_000;
@@ -37,7 +42,7 @@ export type NativeErrorCode =
   | 'unavailable' // host not installed / failed to start / exited
   | 'forbidden' // Chrome policy blocked the host
   | 'cancelled' // user dismissed the native folder picker
-  | 'timeout' // host accepted the message but never answered
+  | 'timeout' // our own deadline elapsed — outcome UNKNOWN, not failed
   | 'malformed' // host answered with something outside the contract
   | 'error'; // host answered { ok: false, error: "..." }
 

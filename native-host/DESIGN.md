@@ -27,29 +27,39 @@ page  ──► content script ──► service worker ──► chrome.runtime
 1 MB, which a single video exceeds. The host writes the file and returns
 `{ok, path, bytes}`.
 
-## The 5-minute wall (important)
+## Transfer duration and the service-worker lifetime
 
-Chrome terminates an extension service worker "when a single request… takes
-longer than 5 minutes to process"[^lifecycle]. A download that takes longer than
-that dies **silently, mid-transfer**.
+Native messaging is **exempt** from the service worker's five-minute cap. Chrome
+states it plainly: *"Some APIs like native messaging provide a strong keep-alive
+which cancel both of these timers"*[^lifetimes]. In the browser source,
+`MessageService::OpenChannelToNativeAppImpl` sets
+`should_have_strong_keepalive(true)` on the opener, which selects
+`ServiceWorkerExternalRequestTimeoutType::kDoesNotTimeout`, i.e.
+`TimeDelta::Max()` rather than the 5-minute default.
 
-The timeouts are therefore nested deliberately:
+So a long download is not killed by Chrome's timer, and the extension does not
+need to fit inside 300 s. The hosts's own `curl --max-time` is ours to choose;
+it is set generously so real transfers complete.
 
-| Layer | Budget | Why |
-|---|---|---|
-| `curl --max-time` in the host | 210 s | gives up first, so the host can report a real error |
-| `TRANSFER_TIMEOUT_MS` in the extension | 240 s | below Chrome's 5-minute kill |
-| Chrome's service-worker limit | 300 s | the hard wall |
+Caveats worth knowing:
+- The strong keep-alive is **documented for `connectNative`** and is only
+  implementation behaviour for one-shot `sendNativeMessage`. Source-verified,
+  not contractual.
+- If Chrome *does* tear the worker down, it **SIGKILLs the host** — check
+  `NativeMessageProcessHost::~NativeMessageProcessHost`, which calls
+  `EnsureProcessTerminated`. That is why the host writes to `.part` and renames
+  only on success: a killed host never leaves a file that looks finished.
+- Our client-side deadline is therefore **our** deadline. When it elapses the
+  host may still be writing, so the history row is recorded as `pending`, never
+  `failed`. Reconciliation (`status` command / reading the job file) is the
+  correct way to resolve it, and is the next step if this proves flaky.
 
-**A download slower than ~3.5 minutes still fails.** That is a real limitation,
-and on a slow connection a large video can exceed it. The correct fix is
-Chrome's documented escape hatch: `runtime.connectNative()` keeps the service
-worker alive from Chrome 105 onward, because a long-lived port resets the idle
-timer[^lifecycle]. That means changing the transport from the stateless
-`sendNativeMessage` (one process per message) to a persistent port, which
-requires request correlation on both sides. It is designed for but **not
-implemented** here — the current code is safe (it fails cleanly rather than
-hanging) but it will not carry a very large file over a slow link.
+An offscreen document cannot help here: native messaging is restricted to the
+`privileged_extension` context in `_api_features.json`, so it is unavailable from
+an offscreen document.[^lifecycle]
+
+[^lifetimes]: https://developer.chrome.com/blog/longer-esw-lifetimes
+[^lifecycle]: https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle
 
 ## Tests
 

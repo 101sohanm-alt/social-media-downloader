@@ -475,6 +475,35 @@ describe('downloadMediaItem — native host path', () => {
     const history = await getHistory();
     expect(history[0].status).toBe('failed');
   });
+
+  it('records a timeout as pending, not failed — the host may still finish', async () => {
+    // The host transfer runs in its own process. When our deadline elapses we
+    // stop listening, but the host keeps downloading and may well write the file
+    // afterwards. Calling that "failed" would paint a red row over a file that
+    // exists, so the outcome must be recorded as unknown.
+    vi.useFakeTimers();
+
+    responder = (message) => {
+      if (message.cmd === 'ping') return { ok: true, version: '0.1.0', platform: 'macos' };
+      if (message.cmd === 'set_folder') return { ok: true, path: '/Users/me/Movies/Omni' };
+      return { ok: true };
+    };
+    // The transfer itself never answers — a host still busy writing bytes.
+    ctx.runtime.sendNativeMessage.mockImplementation(
+      (_host: string, message: { cmd: string }, callback: (r: unknown) => void) => {
+        if (message.cmd === 'download' || message.cmd === 'mux') return; // hang
+        callback(responder(message));
+      }
+    );
+
+    const promise = downloadMediaItem(imageItem, settingsWithHost);
+    await vi.advanceTimersByTimeAsync(TRANSFER_TIMEOUT_MS + 1000);
+    const ok = await promise;
+
+    expect(ok).toBe(true);
+    const history = await getHistory();
+    expect(history[0].status).toBe('pending');
+  });
 });
 
 describe('downloadMediaItem — chrome.downloads fallback', () => {

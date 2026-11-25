@@ -70,7 +70,13 @@ export interface DownloadHistoryItem {
   filename: string;
   timestamp: number;
   thumbnailUrl?: string;
-  status: 'completed' | 'failed';
+  /**
+   * `pending` means the outcome is genuinely unknown, not that it failed: the
+   * native host does the transfer in its own process, so if our deadline elapses
+   * the file may still be written after we stop waiting. Showing that as
+   * `failed` would put a red row against a file that exists.
+   */
+  status: 'completed' | 'failed' | 'pending';
 }
 
 export type ExtensionMessage =
