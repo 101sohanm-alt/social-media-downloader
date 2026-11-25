@@ -65,9 +65,31 @@
     <!-- Tab 2: Settings -->
     <section id="tab-settings" class="tab-pane">
       <div class="form-group">
-        <label for="setting-subfolder">Destination Subfolder</label>
-        <input type="text" id="setting-subfolder" placeholder="SocialDownloads" />
-        <span class="field-hint">Saved inside ~/Downloads/&lt;subfolder&gt;/</span>
+        <span class="form-label" id="folder-label">Download Folder</span>
+        <div class="folder-control">
+          <div
+            id="folder-display"
+            class="folder-display"
+            data-empty="true"
+            role="status"
+            aria-live="polite"
+            aria-labelledby="folder-label"
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v7a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 3 17z"/>
+            </svg>
+            <span id="folder-path" class="folder-path">No folder chosen</span>
+          </div>
+          <div class="folder-actions">
+            <button id="btn-choose-folder" type="button" class="secondary-btn folder-btn">Choose Folder…</button>
+            <button id="btn-clear-folder" type="button" class="ghost-btn" disabled>Clear</button>
+          </div>
+        </div>
+        <span class="field-hint" id="folder-hint">Downloads go to ~/Downloads via the browser.</span>
+        <div id="host-status" class="host-status" data-state="checking">
+          <span class="host-dot" aria-hidden="true"></span>
+          <span id="host-status-text">Checking native host…</span>
+        </div>
       </div>
 
       <div class="form-group">

@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "Omni Media - Universal HD Downloader",
   "version": "1.0.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlN0a0JKqqMnaOYAuRO3CnbVnXFtQ77PScPXL0pxV+5RMOeX4pgn6B1htKyjLpNSt3o/UNfjmSxhgC0lGvfTtUeoEMwp7JvKVOC2ouGfcNp9c9TnsQTH13ibxv5DQaXJm9vB27UeLY8z11Vvsm9Q40XaQKX0qis9ImhfOuaZERre1chbG/E50XNY4upH6LGrZr3rSbPEwNNx0nLlf0q6K9qOd9lxafsDaU7Lphf2c0ZxzUPAR4ZqNjslynWJpD2gUKQkz6rAbcY05WWAOy+dFwEcR9Pph+Jpz9i2+i7vCCMIZxiQlSNDFk+mzQ0b4keTNIPeNDRLg18Y5ed/BpaQgNwIDAQAB",
   "description": "High-resolution photos, videos, and multi-item carousels from Instagram, X (Twitter), and Reddit with seamless player controls.",
   "icons": {
     "16": "icons/icon16.png",
@@ -25,7 +26,8 @@
   "permissions": [
     "downloads",
     "storage",
-    "offscreen"
+    "offscreen",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "*://*.twitter.com/*",

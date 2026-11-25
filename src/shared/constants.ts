@@ -2,9 +2,17 @@ import { UserSettings } from './types';
 
 export const DEFAULT_SETTINGS: UserSettings = {
   subfolder: 'SocialDownloads',
+  nativeFolder: null,
   filenameTemplate: '[{platform}] {author} - {id}_{index}',
   autoDownloadAllCarousel: true,
 };
+
+/**
+ * Chrome native-messaging application name. Must match the `name` field of the
+ * host manifest installed to
+ * `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/`.
+ */
+export const NATIVE_HOST_NAME = 'com.omni.media.downloader';
 
 export const STORAGE_KEYS = {
   SETTINGS: 'soc_settings',

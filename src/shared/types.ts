@@ -48,7 +48,17 @@ export interface PostMetadata {
 }
 
 export interface UserSettings {
+  /**
+   * Legacy `chrome.downloads` destination subfolder (relative to ~/Downloads).
+   * Still honoured by the downloads fallback; blank means ~/Downloads itself.
+   */
   subfolder: string;
+  /**
+   * Absolute folder chosen through the native host's folder picker. When set
+   * (and the host is available) downloads are written there instead of using
+   * `chrome.downloads`. `null` means "no folder chosen".
+   */
+  nativeFolder: string | null;
   filenameTemplate: string;
   autoDownloadAllCarousel: boolean;
 }

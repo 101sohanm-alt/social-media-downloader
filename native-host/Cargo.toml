@@ -1,0 +1,34 @@
+[package]
+name = "omni-native-host"
+version = "1.0.0"
+edition = "2021"
+description = "Native messaging host for the Omni Media Chrome extension: native folder picker and disk writer"
+
+[[bin]]
+name = "omni-native-host"
+path = "src/main.rs"
+
+[dependencies]
+# The wire format is length-prefixed JSON over stdio, so JSON is the only thing
+# the host genuinely needs a library for.
+#
+# Deliberately NO HTTP or TLS crate. Downloads shell out to the system `curl`
+# and remuxing to the system `ffmpeg`:
+#   - both are already installed and battle-tested with real CDN edge cases
+#     (redirects, expiring signed URLs, Referer requirements) that a hand-rolled
+#     client would get wrong
+#   - it drops rustls/ring from the build, which on this machine (2 cores, ~94%
+#     full disk) is the difference between a ~3 minute build and a ~30 second one
+#   - fewer crates means far less supply-chain surface for a component that
+#     writes to the user's filesystem
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+# NOTE: intentionally not `panic = "abort"`. The host catches panics and turns
+# them into a JSON error so Chrome sees a structured failure instead of a dead
+# pipe; catch_unwind requires unwinding.
