@@ -382,7 +382,7 @@ fn fetch_to_file(url: &str, dest: &Path) -> Result<u64, String> {
     // -L follow redirects, --fail turn HTTP errors into a non-zero exit (without
     // it curl writes the error page to disk and reports success), --retry for
     // flaky CDN edges, and a UA/Referer because several CDNs 403 a bare request.
-    let status = ProcCommand::new("/usr/bin/curl")
+    let output = ProcCommand::new("/usr/bin/curl")
         .args([
             "-L",
             "--fail",
@@ -410,13 +410,25 @@ fn fetch_to_file(url: &str, dest: &Path) -> Result<u64, String> {
         .arg(&part)
         .arg(url)
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .status()
+        // `.output()` rather than `.status()`: with a piped stderr that nobody
+        // drains, a chatty failure blocks curl once the pipe buffer fills, and
+        // the diagnostic is lost either way. Capturing it means the reply can
+        // say WHY the transfer failed instead of only an exit code.
+        .output()
         .map_err(|e| format!("could not run curl: {e}"))?;
 
-    if !status.success() {
+    if !output.status.success() {
         let _ = fs::remove_file(&part);
-        return Err(format!("download failed (curl exit {:?}) for {url}", status.code()));
+        let reason = String::from_utf8_lossy(&output.stderr);
+        let reason = reason.trim();
+        let detail = if reason.is_empty() {
+            format!("curl exit {:?}", output.status.code())
+        } else {
+            // Last line only: curl puts the actionable message there.
+            let last = reason.lines().last().unwrap_or(reason);
+            format!("curl exit {:?}: {last}", output.status.code())
+        };
+        return Err(format!("download failed ({detail}) for {url}"));
     }
 
     let bytes = fs::metadata(&part).map_err(|e| format!("downloaded file missing: {e}"))?.len();
@@ -867,12 +879,18 @@ mod tests {
     /// The stream check must reject a video-only file and accept a real mux.
     ///
     /// This is the exact check that would have caught the original mp4box bug,
-    /// where a file with no audio was recorded as completed. Skipped when ffmpeg
-    /// is absent so the suite still runs on a bare machine.
+    /// where a file with no audio was recorded as completed.
+    ///
+    /// A missing ffmpeg SKIPS this test rather than failing it — the suite must
+    /// still run on a bare machine — but the skip is loud, because a silent
+    /// `return` makes an unexercised check indistinguishable from a passing one.
+    /// Failing to synthesise media WITH ffmpeg present is a real failure, not a
+    /// skip: that means the encoder is broken, and the assumption behind the
+    /// whole test is gone.
     #[test]
     fn stream_detection_distinguishes_video_only_from_muxed() {
         let Some(ffmpeg) = find_tool("ffmpeg") else {
-            eprintln!("skipping: ffmpeg not installed");
+            eprintln!("SKIPPED stream_detection: ffmpeg is not installed — this check did NOT run");
             return;
         };
 
@@ -903,12 +921,11 @@ mod tests {
             .map(|s| s.success())
             .unwrap_or(false);
 
-        if !made_video || !made_audio {
-            // No libx264 / aac encoder available: not a failure of our logic.
-            eprintln!("skipping: ffmpeg could not generate test media");
-            let _ = fs::remove_dir_all(&dir);
-            return;
-        }
+        assert!(
+            made_video && made_audio,
+            "ffmpeg is present but could not synthesise test media — the environment \
+             this check depends on is broken, so the check did not actually run"
+        );
 
         // A video-only file must NOT be reported as having audio.
         assert_eq!(
