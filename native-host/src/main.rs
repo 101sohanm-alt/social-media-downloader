@@ -394,8 +394,13 @@ fn fetch_to_file(url: &str, dest: &Path) -> Result<u64, String> {
             "1",
             "--connect-timeout",
             "30",
+            // Chrome terminates an extension service worker whose outstanding
+            // request runs past 5 minutes, and the extension asks for a 4-minute
+            // transfer budget. Give up at 3.5 minutes so curl reports a clean
+            // error back through the bridge instead of the host being killed
+            // mid-transfer with nothing to show for it.
             "--max-time",
-            "900",
+            "210",
             "-A",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
             "-e",

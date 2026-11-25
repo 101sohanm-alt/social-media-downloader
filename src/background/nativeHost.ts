@@ -17,8 +17,18 @@ import { NATIVE_HOST_NAME } from '../shared/constants';
 /** Control calls (ping/folder) are interactive; 30 s is generous. */
 export const CONTROL_TIMEOUT_MS = 30_000;
 
-/** Transfers can be hundreds of MB on a slow link — never use the control budget. */
-export const TRANSFER_TIMEOUT_MS = 15 * 60_000;
+/**
+ * Transfers must finish inside Chrome's limit, not the other way round.
+ *
+ * The docs are explicit: a service worker is terminated "when a single request,
+ * such as an event or API call, takes longer than 5 minutes to process"
+ * (developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle).
+ * A 15-minute transfer budget therefore guaranteed silent death on any large
+ * file. 4 minutes leaves headroom for the response to be delivered before the
+ * worker is torn down, and the host's own curl deadline is set below this so the
+ * host always reports its failure rather than being killed mid-flight.
+ */
+export const TRANSFER_TIMEOUT_MS = 4 * 60_000;
 
 /** Cache the ping so a 10-slide carousel does not spawn 10 host processes. */
 export const AVAILABILITY_TTL_MS = 60_000;
